@@ -1,5 +1,6 @@
 // [[file:../edip.note::1141962a][1141962a]]
-#![deny(warnings)]
+//#![deny(warnings)]
+mod edip;
 // 1141962a ends here
 
 // [[file:../edip.note::*mods][mods:1]]

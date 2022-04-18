@@ -6,6 +6,10 @@ edition = "2021"
 authors = ["Wenping Guo <ybyygu@gmail.com>"]
 
 [dependencies]
+# FIXME: remove when ready
+gchemol = { version = "0.0.42", features=["adhoc"] }
+vecfx = { version="0.1", features = ["nalgebra"] }
+gut = {version="0.1.3", package="gchemol-gut"}
 
 [dev-dependencies]
 
