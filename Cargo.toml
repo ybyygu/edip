@@ -1,0 +1,18 @@
+# [[file:edip.note::11f0794f][11f0794f]]
+[package]
+name = "edip"
+version = "0.0.1"
+edition = "2021"
+authors = ["Wenping Guo <ybyygu@gmail.com>"]
+
+[dependencies]
+
+[dev-dependencies]
+
+# workspace independent
+[workspace]
+
+[features]
+# for adhoc hacking
+adhoc = []
+# 11f0794f ends here
