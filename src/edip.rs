@@ -30,6 +30,7 @@ eta = detla/Qo
 use super::*;
 
 use gut::prelude::*;
+use std::collections::HashSet;
 
 const MAX_PART: usize = 4097; /* maximum number of particles (no dynamic mem.alloc.) */
 const MAX_NBRS: usize = 30;
@@ -184,56 +185,15 @@ fn pow(x: f64, r: f64) -> f64 {
 }
 // d9088664 ends here
 
-// [[file:../edip.note::b6ca29b6][b6ca29b6]]
-use std::collections::{HashMap, HashSet};
-
-fn build_verlet_list(map: Vec<HashSet<usize>>) -> (Vec<usize>, Vec<usize>) {
-    let mut p_nbrs = vec![0];
-    let mut neighbors = vec![];
-    for (i, x) in map.iter().enumerate() {
-        let m = x.len();
-        neighbors.extend(x);
-        let n = neighbors.len();
-        p_nbrs.push(n);
-    }
-    (neighbors, p_nbrs)
-}
-
-#[test]
-fn test_verlet_list() {
-    let mut neighbors: Vec<HashSet<usize>> = vec![];
-    neighbors.push(vec![1, 2].into_iter().collect()); // 0
-    neighbors.push(vec![0].into_iter().collect()); // 1
-    neighbors.push(vec![0, 3, 4].into_iter().collect()); // 2
-    neighbors.push(vec![2].into_iter().collect()); // 3
-    neighbors.push(vec![2].into_iter().collect()); // 4
-
-    let (nbrs, p_nbrs) = build_verlet_list(neighbors);
-    let i = 0;
-    let connected = (p_nbrs[i]..p_nbrs[i + 1]).map(|n| nbrs[n]).collect_vec();
-    assert_eq!(connected.len(), 2);
-    assert!(connected.contains(&1));
-    assert!(connected.contains(&2));
-
-    let i = 3;
-    let connected = (p_nbrs[i]..p_nbrs[i + 1]).map(|n| nbrs[n]).collect_vec();
-    assert_eq!(connected.len(), 1);
-    assert_eq!(connected[0], 2);
-}
-// b6ca29b6 ends here
-
 // [[file:../edip.note::9c60872a][9c60872a]]
 fn compute_forces_edip(
-    // Contains position vectors of each particle.
+    // Position of each atom.
     pos: &[Vector3],
-    // On output, contains the total force on each particle.
+    // On output, contains the total force on each atom.
     f: &mut [Vector3],
-    // Contains a list of particle numbers (indices in the pos[], local[], f[]
-    // arrays).
-    neighbors: &[usize],
-    // The neighbors of atom i are given by the block of neighbors[] between
-    // p_nbrs[i] and p_nbrs[i+1].
-    p_nbrs: &[usize],
+    // A list of neighboring atoms of atom i (same indices as in the pos and f
+    // ).
+    neighbors: &[HashSet<usize>],
 ) -> (f64, f64) {
     /* measurements in force routine */
     let mut virial = 0.0;
@@ -306,9 +266,7 @@ fn compute_forces_edip(
         let mut nz = 0; /* size of sz[] */
 
         /*--- LEVEL 2: LOOP PREPASS OVER PAIRS ---*/
-        for n in p_nbrs[i]..p_nbrs[i + 1] {
-            let j = neighbors[n];
-
+        for &j in &neighbors[i] {
             /* TEST IF WITHIN OUTER CUTOFF */
             let mut dx = pos[j].x - pos[i].x;
             // dx = MIN_IMAGE_DISTANCE(dx,box.L_x,box.L_x_div2);
@@ -393,22 +351,22 @@ fn compute_forces_edip(
         }
 
         /* ENVIRONMENT-DEPENDENCE OF PAIR INTERACTION */
-        let mut pZ = 0.0;
+        let mut pz = 0.0;
         let mut dp = 0.0;
         if V2_on {
             if V2_on {
                 if V2Z_on {
                     let temp0 = bet * Z;
-                    pZ = palp * exp(-temp0 * Z); /* bond order */
-                    dp = -2.0 * temp0 * pZ; /* derivative of bond order */
+                    pz = palp * exp(-temp0 * Z); /* bond order */
+                    dp = -2.0 * temp0 * pz; /* derivative of bond order */
                 } else {
-                    pZ = palp * exp(-bet * 16.0);
+                    pz = palp * exp(-bet * 16.0);
                 }
             }
 
             /*--- LEVEL 2: LOOP FOR PAIR INTERACTIONS ---*/
             for nj in 0..n2 {
-                let temp0 = s2[nj].t1 - pZ;
+                let temp0 = s2[nj].t1 - pz;
                 /* two-body energy V2(rij,Z) */
                 v2 += temp0 * s2[nj].t0;
 
@@ -588,10 +546,9 @@ fn test_edip() -> Result<()> {
         xx.remove(&i);
         neighbors.push(xx.into_iter().collect());
     }
-    let (nbrs, p_nbrs) = build_verlet_list(neighbors);
     let pos = mol.positions().map(|[x, y, z]| Vector3 { x, y, z }).collect_vec();
     let mut f = vec![Vector3 { x: 0.0, y: 0.0, z: 0.0 }; n];
-    let (energy, virial) = compute_forces_edip(&pos, &mut f, &nbrs, &p_nbrs);
+    let (energy, virial) = compute_forces_edip(&pos, &mut f, &neighbors);
     approx::assert_relative_eq!(energy, -14.566606, epsilon = 1e-5);
     approx::assert_relative_eq!(virial, -3.643552, epsilon = 1e-5);
 
