@@ -27,13 +27,12 @@ eta = detla/Qo
 // 83a3f290 ends here
 
 // [[file:../edip.note::178e12ff][178e12ff]]
+#![allow(non_snake_case)]
+#![allow(non_upper_case_globals)]
 use super::*;
 
 use gut::prelude::*;
 use std::collections::HashSet;
-
-// FIXME: refactor
-const MAX_NBRS: usize = 30;
 
 type Array3 = [f64; 3];
 // 178e12ff ends here
@@ -45,7 +44,8 @@ const u2: f64 = 32.557;
 const u3: f64 = 0.286198;
 const u4: f64 = 0.66;
 
-struct EdipParams {
+/// Parameters for EDIP
+pub struct EdipParams {
     A: f64,
     B: f64,
     rh: f64,
@@ -69,7 +69,7 @@ struct EdipParams {
 
 impl EdipParams {
     /// EDIP-Si Parameters
-    fn silicon() -> Self {
+    pub fn silicon() -> Self {
         let A = 5.6714030;
         let B = 2.0002804;
         let rh = 1.2085196;
@@ -118,7 +118,7 @@ const V3g_on: bool = true;
 const V3h_on: bool = true;
 const V3Z_on: bool = true;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 struct Store2 {
     // various V2 functions and derivatives
     t0: f64,
@@ -133,7 +133,7 @@ struct Store2 {
     r: f64,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 struct Store3 {
     // 3-body radial function and its derivative
     g: f64,
@@ -148,7 +148,7 @@ struct Store3 {
     r: f64,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 struct Storez {
     // derivative of neighbor function f'(r)
     df: f64,
@@ -161,10 +161,6 @@ struct Storez {
     // bond length (only needed for virial)
     r: f64,
 }
-
-fn exp(x: f64) -> f64 {
-    x.exp()
-}
 // d9088664 ends here
 
 // [[file:../edip.note::9c60872a][9c60872a]]
@@ -173,68 +169,50 @@ fn compute_forces_edip(
     positions: &[Array3],
     // On output, contains the total force on each atom.
     forces: &mut [Array3],
-    // A list of neighbors of atom i (same indices as in the positions and forces ).
+    // A list of double counted neighbors of atom i (same indices as in the positions and forces ).
     neighbors: &[HashSet<usize>],
+    // Parameter set for EDIP
+    params: &EdipParams,
 ) -> (f64, f64) {
-    /* measurements in force routine */
-    let mut virial = 0.0;
-    let mut e_potential = 0.0;
-    let mut v2 = 0.0;
-    let mut v3 = 0.0;
-    let mut v2sum = 0.0;
-    let mut coord_total = 0.0;
-
-    /* atom ID numbers for s2[] */
-    let mut num2 = vec![0; MAX_NBRS];
-    /* atom ID numbers for s3[] */
-    let mut num3 = vec![0; MAX_NBRS];
-    /* atom ID numbers for sz[] */
-    let mut numz = vec![0; MAX_NBRS];
-
-    let mut s2 = vec![Store2::default(); MAX_NBRS];
-    let mut s3 = vec![Store3::default(); MAX_NBRS];
-    /* coordination number stuff, c<r<b */
-    let mut sz = vec![Storez::default(); MAX_NBRS];
-    let EdipParams {
-        A,
-        B,
-        rh,
-        a,
-        sig,
-        lam,
-        gam,
-        b,
-        c,
-        delta,
-        mu,
-        Qo,
-        palp,
-        bet,
-        alp,
-        bg,
-        eta,
-    } = EdipParams::silicon();
-
-    /* INITIALIZE FORCES AND GLOBAL SUMS */
-    assert_eq!(positions.len(), forces.len());
     // the total number of particles
     let n_own = positions.len();
+    assert_eq!(forces.len(), n_own);
+    assert_eq!(neighbors.len(), n_own);
+    assert!(!neighbors.is_empty(), "invalid neighbors: {neighbors:?}");
+    let max_nbrs = neighbors.iter().map(|x| x.len()).max().unwrap();
+
+    /* atom ID numbers for s2[] */
+    let mut num2 = vec![0; max_nbrs];
+    /* atom ID numbers for s3[] */
+    let mut num3 = vec![0; max_nbrs];
+    /* atom ID numbers for sz[] */
+    let mut numz = vec![0; max_nbrs];
+
+    let mut s2 = vec![Store2::default(); max_nbrs];
+    let mut s3 = vec![Store3::default(); max_nbrs];
+    /* coordination number stuff, c<r<b */
+    let mut sz = vec![Storez::default(); max_nbrs];
+
+    /* INITIALIZE FORCES AND GLOBAL SUMS */
     for i in 0..n_own {
         forces[i] = [0.0; 3];
     }
 
-    coord_total = 0.0;
-    virial = 0.0;
-    v2 = 0.0; /* e_potential = v2 + v3 */
-    v3 = 0.0;
+    /* measurements in force routine */
+    let mut e_potential = 0.0;
+    // e_potential = e_v2 + e_v3
+    let mut e_v2 = 0.0;
+    let mut e_v3 = 0.0;
+    let mut coord_total = 0.0;
+    let mut virial = 0.0;
 
     /* COMBINE COEFFICIENTS */
-    let asqr = a * a;
-    let Qort = Qo.sqrt();
-    let muhalf = mu * 0.5;
+    let asqr = params.a.powi(2);
+    let Qort = params.Qo.sqrt();
+    let muhalf = params.mu * 0.5;
     let u5 = u2 * u4;
-    let bmc = b - c;
-    let cmbinv = 1.0 / (c - b);
+    let bmc = params.b - params.c;
+    let cmbinv = 1.0 / (params.c - params.b);
 
     /*--- LEVEL 1: OUTER LOOP OVER ATOMS ---*/
     for i in 0..n_own {
@@ -247,41 +225,41 @@ fn compute_forces_edip(
         /*--- LEVEL 2: LOOP PREPASS OVER PAIRS ---*/
         for &j in &neighbors[i] {
             /* TEST IF WITHIN OUTER CUTOFF */
-            let mut dx = positions[j][0] - positions[i][0];
+            let dx = positions[j][0] - positions[i][0];
             // dx = MIN_IMAGE_DISTANCE(dx,box.L_x,box.L_x_div2);
-            if dx.abs() < a {
-                let mut dy = positions[j][1] - positions[i][1];
+            if dx.abs() < params.a {
+                let dy = positions[j][1] - positions[i][1];
                 // dy = MIN_IMAGE_DISTANCE(dy,box.L_y,box.L_y_div2);
-                if dy.abs() < a {
-                    let mut dz = positions[j][2] - positions[i][2];
+                if dy.abs() < params.a {
+                    let dz = positions[j][2] - positions[i][2];
                     // dz = MIN_IMAGE_DISTANCE(dz,box.L_z,box.L_z_div2);
-                    if dz.abs() < a {
+                    if dz.abs() < params.a {
                         let rsqr = dx * dx + dy * dy + dz * dz;
                         if rsqr < asqr {
                             let r = rsqr.sqrt();
                             /* PARTS OF TWO-BODY INTERACTION r<a */
                             num2[n2] = j;
                             let rinv = 1.0 / r;
-                            dx *= rinv;
-                            dy *= rinv;
-                            dz *= rinv;
-                            let rmainv = 1.0 / (r - a);
-                            s2[n2].t0 = A * exp(sig * rmainv);
-                            s2[n2].t1 = (B * rinv).powf(rh);
-                            s2[n2].t2 = rh * rinv;
-                            s2[n2].t3 = sig * rmainv * rmainv;
-                            s2[n2].dx = dx;
-                            s2[n2].dy = dy;
-                            s2[n2].dz = dz;
+                            let dxrinv = dx * rinv;
+                            let dyrinv = dy * rinv;
+                            let dzrinv = dz * rinv;
+                            let rmainv = 1.0 / (r - params.a);
+                            s2[n2].t0 = params.A * (params.sig * rmainv).exp();
+                            s2[n2].t1 = (params.B * rinv).powf(params.rh);
+                            s2[n2].t2 = params.rh * rinv;
+                            s2[n2].t3 = params.sig * rmainv * rmainv;
+                            s2[n2].dx = dxrinv;
+                            s2[n2].dy = dyrinv;
+                            s2[n2].dz = dzrinv;
                             s2[n2].r = r;
                             n2 += 1;
 
                             /* RADIAL PARTS OF THREE-BODY INTERACTION r<b */
-                            if r < bg {
+                            if r < params.bg {
                                 num3[n3] = j;
-                                let rmbinv = 1.0 / (r - bg);
-                                let temp1 = gam * rmbinv;
-                                let temp0 = exp(temp1);
+                                let rmbinv = 1.0 / (r - params.bg);
+                                let temp1 = params.gam * rmbinv;
+                                let temp0 = temp1.exp();
                                 if V3g_on {
                                     s3[n3].g = temp0;
                                     s3[n3].dg = -rmbinv * temp1 * temp0;
@@ -289,29 +267,29 @@ fn compute_forces_edip(
                                     s3[n3].g = 1.0;
                                     s3[n3].dg = 0.0;
                                 }
-                                s3[n3].dx = dx;
-                                s3[n3].dy = dy;
-                                s3[n3].dz = dz;
+                                s3[n3].dx = dxrinv;
+                                s3[n3].dy = dyrinv;
+                                s3[n3].dz = dzrinv;
                                 s3[n3].rinv = rinv;
                                 s3[n3].r = r;
                                 n3 += 1;
 
                                 /* COORDINATION AND NEIGHBOR FUNCTION c<r<b */
-                                if r < b {
-                                    if r < c {
+                                if r < params.b {
+                                    if r < params.c {
                                         Z += 1.0;
                                     } else {
-                                        let xinv = bmc / (r - c);
-                                        let xinv3 = xinv * xinv * xinv;
+                                        let xinv = bmc / (r - params.c);
+                                        let xinv3 = xinv.powi(3);
                                         let den = 1.0 / (1.0 - xinv3);
-                                        let temp1 = alp * den;
-                                        let fZ = exp(temp1);
+                                        let temp1 = params.alp * den;
+                                        let fZ = temp1.exp();
                                         Z += fZ;
                                         numz[nz] = j;
                                         sz[nz].df = fZ * temp1 * den * 3.0 * xinv3 * xinv * cmbinv; /* df/dr */
-                                        sz[nz].dx = dx;
-                                        sz[nz].dy = dy;
-                                        sz[nz].dz = dz;
+                                        sz[nz].dx = dxrinv;
+                                        sz[nz].dy = dyrinv;
+                                        sz[nz].dz = dzrinv;
                                         sz[nz].r = r;
                                         nz += 1;
                                     }
@@ -333,21 +311,18 @@ fn compute_forces_edip(
         let mut pz = 0.0;
         let mut dp = 0.0;
         if V2_on {
-            if V2_on {
-                if V2Z_on {
-                    let temp0 = bet * Z;
-                    pz = palp * exp(-temp0 * Z); /* bond order */
-                    dp = -2.0 * temp0 * pz; /* derivative of bond order */
-                } else {
-                    pz = palp * exp(-bet * 16.0);
-                }
+            if V2Z_on {
+                let temp0 = params.bet * Z;
+                pz = params.palp * (-temp0 * Z).exp(); /* bond order */
+                dp = -2.0 * temp0 * pz; /* derivative of bond order */
+            } else {
+                pz = params.palp * (-params.bet * 16.0).exp();
             }
-
             /*--- LEVEL 2: LOOP FOR PAIR INTERACTIONS ---*/
             for nj in 0..n2 {
                 let temp0 = s2[nj].t1 - pz;
                 /* two-body energy V2(rij,Z) */
-                v2 += temp0 * s2[nj].t0;
+                e_v2 += temp0 * s2[nj].t0;
 
                 /* two-body forces */
                 let dV2j = -(s2[nj].t0) * ((s2[nj].t1) * (s2[nj].t2) + temp0 * (s2[nj].t3)); /* dV2/dr */
@@ -380,20 +355,20 @@ fn compute_forces_edip(
         let mut dwinv = 0.0;
         if V3_on {
             if V3Z_on {
-                winv = Qort * exp(-muhalf * Z); /* inverse width of angular function */
+                winv = Qort * (-muhalf * Z).exp(); /* inverse width of angular function */
                 dwinv = -muhalf * winv; /* its derivative */
-                let temp0 = exp(-u4 * Z);
+                let temp0 = (-u4 * Z).exp();
                 tau = u1 + u2 * temp0 * (u3 - temp0); /* -cosine of angular minimum */
                 dtau = u5 * temp0 * (2.0 * temp0 - u3); /* its derivative */
             } else {
-                winv = Qort * exp(-muhalf * 4.0);
+                winv = Qort * (-muhalf * 4.0).exp();
                 dwinv = 0.0;
                 tau = 1.0 / 3.0;
                 dtau = 0.0;
             }
 
             /*--- LEVEL 2: FIRST LOOP FOR THREE-BODY INTERACTIONS ---*/
-            for nj in 0..n3 - 1 {
+            for nj in 0..(n3 - 1) {
                 let j = num3[nj];
                 /*--- LEVEL 3: SECOND LOOP FOR THREE-BODY INTERACTIONS ---*/
                 for nk in (nj + 1)..n3 {
@@ -401,14 +376,14 @@ fn compute_forces_edip(
                     /* angular function h(l,Z) */
                     let lcos = s3[nj].dx * s3[nk].dx + s3[nj].dy * s3[nk].dy + s3[nj].dz * s3[nk].dz;
                     let x = (lcos + tau) * winv;
-                    let temp0 = exp(-x * x);
+                    let temp0 = (-x * x).exp();
 
-                    let mut H;
-                    let mut dhdl;
+                    let H;
+                    let dhdl;
                     let mut dHdx = 0.0;
                     if V3h_on {
-                        H = lam * (1.0 - temp0 + eta * x * x);
-                        dHdx = 2.0 * lam * x * (temp0 + eta);
+                        H = params.lam * (1.0 - temp0 + params.eta * x * x);
+                        dHdx = 2.0 * params.lam * x * (temp0 + params.eta);
                         dhdl = dHdx * winv;
                     } else {
                         H = 1.0;
@@ -417,7 +392,7 @@ fn compute_forces_edip(
 
                     /* three-body energy */
                     let temp1 = s3[nj].g * s3[nk].g;
-                    v3 += temp1 * H;
+                    e_v3 += temp1 * H;
 
                     /* (-) radial force on atom j */
                     let dV3rij = s3[nj].dg * s3[nk].g * H;
@@ -500,7 +475,7 @@ fn compute_forces_edip(
             virial -= sz[nl].r * (dedrlx * sz[nl].dx + dedrly * sz[nl].dy + dedrlz * sz[nl].dz);
         }
     }
-    let e_potential = v2 + v3;
+    let e_potential = e_v2 + e_v3;
     virial /= 3.0;
 
     (e_potential, virial)
@@ -526,7 +501,8 @@ fn test_edip() -> Result<()> {
         neighbors.push(xx.into_iter().collect());
     }
     let mut f = vec![[0.0; 3]; n];
-    let (energy, virial) = compute_forces_edip(&pos, &mut f, &neighbors);
+    let params = EdipParams::silicon();
+    let (energy, virial) = compute_forces_edip(&pos, &mut f, &neighbors, &params);
     approx::assert_relative_eq!(energy, -14.566606, epsilon = 1e-5);
     approx::assert_relative_eq!(virial, -3.643552, epsilon = 1e-5);
     #[rustfmt::skip]
