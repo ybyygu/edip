@@ -32,7 +32,7 @@ eta = detla/Qo
 use super::*;
 
 use gut::prelude::*;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 type Array3 = [f64; 3];
 // 178e12ff ends here
@@ -156,19 +156,19 @@ struct Storez {
 // d9088664 ends here
 
 // [[file:../edip.note::9c60872a][9c60872a]]
-fn compute_forces_edip(
-    // Position of each atom.
-    positions: &[Array3],
-    // On output, contains the total force on each atom.
+pub fn compute_forces_edip(
+    // The total forces to be computed
     forces: &mut [Array3],
-    // A list of double counted neighbors of atom i (same indices as in the positions and forces ).
+    // A list of double counted neighbors of atom i (same indices as in the forces ).
     neighbors: &[HashSet<usize>],
+    // Contains relative coordinates of atom j relative to its neighboring atom
+    // i. Will panic if no data for any pair of neighboring atoms i and j
+    distances: &HashMap<(usize, usize), Array3>,
     // Parameter set for EDIP
     params: &EdipParams,
 ) -> (f64, f64) {
     // the total number of particles
-    let n_own = positions.len();
-    assert_eq!(forces.len(), n_own);
+    let n_own = forces.len();
     assert_eq!(neighbors.len(), n_own);
     assert!(!neighbors.is_empty(), "invalid neighbors: {neighbors:?}");
     let max_nbrs = neighbors.iter().map(|x| x.len()).max().unwrap();
@@ -217,9 +217,7 @@ fn compute_forces_edip(
         for &j in &neighbors[i] {
             assert_ne!(i, j);
             /* TEST IF WITHIN OUTER CUTOFF */
-            let dx = positions[j][0] - positions[i][0];
-            let dy = positions[j][1] - positions[i][1];
-            let dz = positions[j][2] - positions[i][2];
+            let [dx, dy, dz] = distances[&(i, j)];
             let rsqr = dx * dx + dy * dy + dz * dz;
             if dx.abs() < params.a && dy.abs() < params.a && dz.abs() < params.a && rsqr < asqr {
                 let r = rsqr.sqrt();
@@ -439,16 +437,28 @@ fn test_edip() -> Result<()> {
     let mol = Molecule::from_file(f)?;
 
     let n = mol.natoms();
-    let pos = mol.positions().collect_vec();
+    let positions = mol.positions().collect_vec();
     let mut neighbors: Vec<HashSet<usize>> = vec![];
+    let mut distances = HashMap::new();
     for i in 0..n {
         let mut xx: HashSet<_> = (0..n).collect();
         xx.remove(&i);
         neighbors.push(xx.into_iter().collect());
+        for j in 0..n {
+            if i != j {
+                let pi = positions[i];
+                let pj = positions[j];
+                let dx = pj[0] - pi[0];
+                let dy = pj[1] - pi[1];
+                let dz = pj[2] - pi[2];
+                distances.insert((i, j), [dx, dy, dz]);
+            }
+        }
     }
+
     let mut f = vec![[0.0; 3]; n];
     let params = EdipParams::silicon();
-    let (energy, virial) = compute_forces_edip(&pos, &mut f, &neighbors, &params);
+    let (energy, virial) = compute_forces_edip(&mut f, &neighbors, &distances, &params);
     approx::assert_relative_eq!(energy, -14.566606, epsilon = 1e-5);
     approx::assert_relative_eq!(virial, -3.643552, epsilon = 1e-5);
     #[rustfmt::skip]
