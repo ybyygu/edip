@@ -226,75 +226,69 @@ fn compute_forces_edip(
         for &j in &neighbors[i] {
             /* TEST IF WITHIN OUTER CUTOFF */
             let dx = positions[j][0] - positions[i][0];
+            let dy = positions[j][1] - positions[i][1];
+            let dz = positions[j][2] - positions[i][2];
             // dx = MIN_IMAGE_DISTANCE(dx,box.L_x,box.L_x_div2);
-            if dx.abs() < params.a {
-                let dy = positions[j][1] - positions[i][1];
-                // dy = MIN_IMAGE_DISTANCE(dy,box.L_y,box.L_y_div2);
-                if dy.abs() < params.a {
-                    let dz = positions[j][2] - positions[i][2];
-                    // dz = MIN_IMAGE_DISTANCE(dz,box.L_z,box.L_z_div2);
-                    if dz.abs() < params.a {
-                        let rsqr = dx * dx + dy * dy + dz * dz;
-                        if rsqr < asqr {
-                            let r = rsqr.sqrt();
-                            /* PARTS OF TWO-BODY INTERACTION r<a */
-                            num2[n2] = j;
-                            let rinv = 1.0 / r;
-                            let dxrinv = dx * rinv;
-                            let dyrinv = dy * rinv;
-                            let dzrinv = dz * rinv;
-                            let rmainv = 1.0 / (r - params.a);
-                            s2[n2].t0 = params.A * (params.sig * rmainv).exp();
-                            s2[n2].t1 = (params.B * rinv).powf(params.rh);
-                            s2[n2].t2 = params.rh * rinv;
-                            s2[n2].t3 = params.sig * rmainv * rmainv;
-                            s2[n2].dx = dxrinv;
-                            s2[n2].dy = dyrinv;
-                            s2[n2].dz = dzrinv;
-                            s2[n2].r = r;
-                            n2 += 1;
+            // dy = MIN_IMAGE_DISTANCE(dy,box.L_y,box.L_y_div2);
+            // dz = MIN_IMAGE_DISTANCE(dz,box.L_z,box.L_z_div2);
+            let rsqr = dx * dx + dy * dy + dz * dz;
+            if dx.abs() < params.a && dy.abs() < params.a && dz.abs() < params.a && rsqr < asqr {
+                let r = rsqr.sqrt();
+                /* PARTS OF TWO-BODY INTERACTION r<a */
+                num2[n2] = j;
+                let rinv = 1.0 / r;
+                let dxrinv = dx * rinv;
+                let dyrinv = dy * rinv;
+                let dzrinv = dz * rinv;
+                let rmainv = 1.0 / (r - params.a);
+                s2[n2].t0 = params.A * (params.sig * rmainv).exp();
+                s2[n2].t1 = (params.B * rinv).powf(params.rh);
+                s2[n2].t2 = params.rh * rinv;
+                s2[n2].t3 = params.sig * rmainv * rmainv;
+                s2[n2].dx = dxrinv;
+                s2[n2].dy = dyrinv;
+                s2[n2].dz = dzrinv;
+                s2[n2].r = r;
+                n2 += 1;
 
-                            /* RADIAL PARTS OF THREE-BODY INTERACTION r<b */
-                            if r < params.bg {
-                                num3[n3] = j;
-                                let rmbinv = 1.0 / (r - params.bg);
-                                let temp1 = params.gam * rmbinv;
-                                let temp0 = temp1.exp();
-                                if V3g_on {
-                                    s3[n3].g = temp0;
-                                    s3[n3].dg = -rmbinv * temp1 * temp0;
-                                } else {
-                                    s3[n3].g = 1.0;
-                                    s3[n3].dg = 0.0;
-                                }
-                                s3[n3].dx = dxrinv;
-                                s3[n3].dy = dyrinv;
-                                s3[n3].dz = dzrinv;
-                                s3[n3].rinv = rinv;
-                                s3[n3].r = r;
-                                n3 += 1;
+                /* RADIAL PARTS OF THREE-BODY INTERACTION r<b */
+                if r < params.bg {
+                    num3[n3] = j;
+                    let rmbinv = 1.0 / (r - params.bg);
+                    let temp1 = params.gam * rmbinv;
+                    let temp0 = temp1.exp();
+                    if V3g_on {
+                        s3[n3].g = temp0;
+                        s3[n3].dg = -rmbinv * temp1 * temp0;
+                    } else {
+                        s3[n3].g = 1.0;
+                        s3[n3].dg = 0.0;
+                    }
+                    s3[n3].dx = dxrinv;
+                    s3[n3].dy = dyrinv;
+                    s3[n3].dz = dzrinv;
+                    s3[n3].rinv = rinv;
+                    s3[n3].r = r;
+                    n3 += 1;
 
-                                /* COORDINATION AND NEIGHBOR FUNCTION c<r<b */
-                                if r < params.b {
-                                    if r < params.c {
-                                        Z += 1.0;
-                                    } else {
-                                        let xinv = bmc / (r - params.c);
-                                        let xinv3 = xinv.powi(3);
-                                        let den = 1.0 / (1.0 - xinv3);
-                                        let temp1 = params.alp * den;
-                                        let fZ = temp1.exp();
-                                        Z += fZ;
-                                        numz[nz] = j;
-                                        sz[nz].df = fZ * temp1 * den * 3.0 * xinv3 * xinv * cmbinv; /* df/dr */
-                                        sz[nz].dx = dxrinv;
-                                        sz[nz].dy = dyrinv;
-                                        sz[nz].dz = dzrinv;
-                                        sz[nz].r = r;
-                                        nz += 1;
-                                    }
-                                }
-                            }
+                    /* COORDINATION AND NEIGHBOR FUNCTION c<r<b */
+                    if r < params.b {
+                        if r < params.c {
+                            Z += 1.0;
+                        } else {
+                            let xinv = bmc / (r - params.c);
+                            let xinv3 = xinv.powi(3);
+                            let den = 1.0 / (1.0 - xinv3);
+                            let temp1 = params.alp * den;
+                            let fZ = temp1.exp();
+                            Z += fZ;
+                            numz[nz] = j;
+                            sz[nz].df = fZ * temp1 * den * 3.0 * xinv3 * xinv * cmbinv; /* df/dr */
+                            sz[nz].dx = dxrinv;
+                            sz[nz].dy = dyrinv;
+                            sz[nz].dz = dzrinv;
+                            sz[nz].r = r;
+                            nz += 1;
                         }
                     }
                 }
