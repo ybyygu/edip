@@ -7,6 +7,10 @@ mod edip;
 
 // mods:1 ends here
 
+// [[file:../edip.note::3d96dcdb][3d96dcdb]]
+pub use crate::edip::*;
+// 3d96dcdb ends here
+
 // [[file:../edip.note::*docs][docs:1]]
 #[cfg(feature = "adhoc")]
 /// Docs for local mods
