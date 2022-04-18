@@ -32,15 +32,10 @@ use super::*;
 use gut::prelude::*;
 use std::collections::HashSet;
 
-const MAX_PART: usize = 4097; /* maximum number of particles (no dynamic mem.alloc.) */
+// FIXME: refactor
 const MAX_NBRS: usize = 30;
 
-#[derive(Debug, Clone, Default)]
-struct Vector3 {
-    x: f64,
-    y: f64,
-    z: f64,
-}
+type Array3 = [f64; 3];
 // 178e12ff ends here
 
 // [[file:../edip.note::8a0e64b1][8a0e64b1]]
@@ -122,10 +117,9 @@ const V3_on: bool = true;
 const V3g_on: bool = true;
 const V3h_on: bool = true;
 const V3Z_on: bool = true;
-const Zfast: bool = true;
 
 #[derive(Debug, Default, Clone)]
-struct store2 {
+struct Store2 {
     // various V2 functions and derivatives
     t0: f64,
     t1: f64,
@@ -140,7 +134,7 @@ struct store2 {
 }
 
 #[derive(Debug, Default, Clone)]
-struct store3 {
+struct Store3 {
     // 3-body radial function and its derivative
     g: f64,
     dg: f64,
@@ -155,7 +149,7 @@ struct store3 {
 }
 
 #[derive(Debug, Default, Clone)]
-struct storez {
+struct Storez {
     // derivative of neighbor function f'(r)
     df: f64,
     // array to accumulate coordination force prefactors
@@ -168,31 +162,18 @@ struct storez {
     r: f64,
 }
 
-fn sqrt(x: f64) -> f64 {
-    x.sqrt()
-}
-
-fn fabs(x: f64) -> f64 {
-    x.abs()
-}
-
 fn exp(x: f64) -> f64 {
     x.exp()
-}
-
-fn pow(x: f64, r: f64) -> f64 {
-    x.powf(r)
 }
 // d9088664 ends here
 
 // [[file:../edip.note::9c60872a][9c60872a]]
 fn compute_forces_edip(
     // Position of each atom.
-    pos: &[Vector3],
+    positions: &[Array3],
     // On output, contains the total force on each atom.
-    f: &mut [Vector3],
-    // A list of neighboring atoms of atom i (same indices as in the pos and f
-    // ).
+    forces: &mut [Array3],
+    // A list of neighbors of atom i (same indices as in the positions and forces ).
     neighbors: &[HashSet<usize>],
 ) -> (f64, f64) {
     /* measurements in force routine */
@@ -210,10 +191,10 @@ fn compute_forces_edip(
     /* atom ID numbers for sz[] */
     let mut numz = vec![0; MAX_NBRS];
 
-    let mut s2 = vec![store2::default(); MAX_NBRS];
-    let mut s3 = vec![store3::default(); MAX_NBRS];
+    let mut s2 = vec![Store2::default(); MAX_NBRS];
+    let mut s3 = vec![Store3::default(); MAX_NBRS];
     /* coordination number stuff, c<r<b */
-    let mut sz = vec![storez::default(); MAX_NBRS];
+    let mut sz = vec![Storez::default(); MAX_NBRS];
     let EdipParams {
         A,
         B,
@@ -235,13 +216,11 @@ fn compute_forces_edip(
     } = EdipParams::silicon();
 
     /* INITIALIZE FORCES AND GLOBAL SUMS */
-    assert_eq!(pos.len(), f.len());
+    assert_eq!(positions.len(), forces.len());
     // the total number of particles
-    let N_own = pos.len();
-    for i in 0..N_own {
-        f[i].x = 0.0;
-        f[i].y = 0.0;
-        f[i].z = 0.0;
+    let n_own = positions.len();
+    for i in 0..n_own {
+        forces[i] = [0.0; 3];
     }
 
     coord_total = 0.0;
@@ -251,14 +230,14 @@ fn compute_forces_edip(
 
     /* COMBINE COEFFICIENTS */
     let asqr = a * a;
-    let Qort = sqrt(Qo);
+    let Qort = Qo.sqrt();
     let muhalf = mu * 0.5;
     let u5 = u2 * u4;
     let bmc = b - c;
     let cmbinv = 1.0 / (c - b);
 
     /*--- LEVEL 1: OUTER LOOP OVER ATOMS ---*/
-    for i in 0..N_own {
+    for i in 0..n_own {
         /* RESET COORDINATION AND NEIGHBOR NUMBERS */
         let mut Z = 0.0;
         let mut n2 = 0; /* size of s2[] */
@@ -268,18 +247,18 @@ fn compute_forces_edip(
         /*--- LEVEL 2: LOOP PREPASS OVER PAIRS ---*/
         for &j in &neighbors[i] {
             /* TEST IF WITHIN OUTER CUTOFF */
-            let mut dx = pos[j].x - pos[i].x;
+            let mut dx = positions[j][0] - positions[i][0];
             // dx = MIN_IMAGE_DISTANCE(dx,box.L_x,box.L_x_div2);
-            if fabs(dx) < a {
-                let mut dy = pos[j].y - pos[i].y;
+            if dx.abs() < a {
+                let mut dy = positions[j][1] - positions[i][1];
                 // dy = MIN_IMAGE_DISTANCE(dy,box.L_y,box.L_y_div2);
-                if fabs(dy) < a {
-                    let mut dz = pos[j].z - pos[i].z;
+                if dy.abs() < a {
+                    let mut dz = positions[j][2] - positions[i][2];
                     // dz = MIN_IMAGE_DISTANCE(dz,box.L_z,box.L_z_div2);
-                    if fabs(dz) < a {
+                    if dz.abs() < a {
                         let rsqr = dx * dx + dy * dy + dz * dz;
                         if rsqr < asqr {
-                            let r = sqrt(rsqr);
+                            let r = rsqr.sqrt();
                             /* PARTS OF TWO-BODY INTERACTION r<a */
                             num2[n2] = j;
                             let rinv = 1.0 / r;
@@ -288,7 +267,7 @@ fn compute_forces_edip(
                             dz *= rinv;
                             let rmainv = 1.0 / (r - a);
                             s2[n2].t0 = A * exp(sig * rmainv);
-                            s2[n2].t1 = pow(B * rinv, rh);
+                            s2[n2].t1 = (B * rinv).powf(rh);
                             s2[n2].t2 = rh * rinv;
                             s2[n2].t3 = sig * rmainv * rmainv;
                             s2[n2].dx = dx;
@@ -375,13 +354,13 @@ fn compute_forces_edip(
                 let dV2ijx = dV2j * s2[nj].dx;
                 let dV2ijy = dV2j * s2[nj].dy;
                 let dV2ijz = dV2j * s2[nj].dz;
-                f[i].x += dV2ijx;
-                f[i].y += dV2ijy;
-                f[i].z += dV2ijz;
+                forces[i][0] += dV2ijx;
+                forces[i][1] += dV2ijy;
+                forces[i][2] += dV2ijz;
                 let j = num2[nj];
-                f[j].x -= dV2ijx;
-                f[j].y -= dV2ijy;
-                f[j].z -= dV2ijz;
+                forces[j][0] -= dV2ijx;
+                forces[j][1] -= dV2ijy;
+                forces[j][2] -= dV2ijz;
 
                 /* dV2/dr contribution to virial */
                 virial -= s2[nj].r * (dV2ijx * s2[nj].dx + dV2ijy * s2[nj].dy + dV2ijz * s2[nj].dz);
@@ -476,15 +455,15 @@ fn compute_forces_edip(
                     fkz += dV3lkz;
 
                     /* apply radial + angular forces to i, j, k */
-                    f[j].x -= fjx;
-                    f[j].y -= fjy;
-                    f[j].z -= fjz;
-                    f[k].x -= fkx;
-                    f[k].y -= fky;
-                    f[k].z -= fkz;
-                    f[i].x += fjx + fkx;
-                    f[i].y += fjy + fky;
-                    f[i].z += fjz + fkz;
+                    forces[j][0] -= fjx;
+                    forces[j][1] -= fjy;
+                    forces[j][2] -= fjz;
+                    forces[k][0] -= fkx;
+                    forces[k][1] -= fky;
+                    forces[k][2] -= fkz;
+                    forces[i][0] += fjx + fkx;
+                    forces[i][1] += fjy + fky;
+                    forces[i][2] += fjz + fkz;
 
                     /* dV3/dR contributions to virial */
                     virial -= s3[nj].r * (fjx * s3[nj].dx + fjy * s3[nj].dy + fjz * s3[nj].dz);
@@ -509,13 +488,13 @@ fn compute_forces_edip(
             let dedrlx = dedrl * sz[nl].dx;
             let dedrly = dedrl * sz[nl].dy;
             let dedrlz = dedrl * sz[nl].dz;
-            f[i].x += dedrlx;
-            f[i].y += dedrly;
-            f[i].z += dedrlz;
+            forces[i][0] += dedrlx;
+            forces[i][1] += dedrly;
+            forces[i][2] += dedrlz;
             let l = numz[nl];
-            f[l].x -= dedrlx;
-            f[l].y -= dedrly;
-            f[l].z -= dedrlz;
+            forces[l][0] -= dedrlx;
+            forces[l][1] -= dedrly;
+            forces[l][2] -= dedrlz;
 
             /* dE/dZ*dZ/dr contribution to virial */
             virial -= sz[nl].r * (dedrlx * sz[nl].dx + dedrly * sz[nl].dy + dedrlz * sz[nl].dz);
@@ -539,20 +518,17 @@ fn test_edip() -> Result<()> {
     let mol = Molecule::from_file(f)?;
 
     let n = mol.natoms();
-    let positions = mol.positions().collect_vec();
+    let pos = mol.positions().collect_vec();
     let mut neighbors: Vec<HashSet<usize>> = vec![];
     for i in 0..n {
         let mut xx: HashSet<_> = (0..n).collect();
         xx.remove(&i);
         neighbors.push(xx.into_iter().collect());
     }
-    let pos = mol.positions().map(|[x, y, z]| Vector3 { x, y, z }).collect_vec();
-    let mut f = vec![Vector3 { x: 0.0, y: 0.0, z: 0.0 }; n];
+    let mut f = vec![[0.0; 3]; n];
     let (energy, virial) = compute_forces_edip(&pos, &mut f, &neighbors);
     approx::assert_relative_eq!(energy, -14.566606, epsilon = 1e-5);
     approx::assert_relative_eq!(virial, -3.643552, epsilon = 1e-5);
-
-    let f = f.iter().map(|a| [a.x, a.y, a.z]).collect_vec();
     #[rustfmt::skip]
     let f_expected = [ -0.19701000,  -0.62522600,   0.02948000,
                        -0.23330600,   0.43698600,   0.42511400,
