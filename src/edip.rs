@@ -78,6 +78,97 @@ struct Storez {
 }
 // d9088664 ends here
 
+// [[file:../edip.note::44c1697e][44c1697e]]
+impl EdipParams {
+    fn compute_prepass(
+        self,
+        num2: &mut [usize],
+        num3: &mut [usize],
+        numz: &mut [usize],
+        s2: &mut [Store2],
+        s3: &mut [Store3],
+        sz: &mut [Storez],
+        neighbors: &[HashSet<usize>],
+        distances: &HashMap<(usize, usize), Array3>,
+        i: usize,
+    ) -> (f64, usize, usize, usize) {
+        /*--- LEVEL 1: OUTER LOOP OVER ATOMS ---*/
+        /* RESET COORDINATION AND NEIGHBOR NUMBERS */
+        let mut Z = 0.0;
+        let mut n2 = 0; /* size of s2[] */
+        let mut n3 = 0; /* size of s3[] */
+        let mut nz = 0; /* size of sz[] */
+
+        let cmb_inv = 1.0 / (self.c - self.b);
+        let asqr = self.a.powi(2);
+        /*--- LEVEL 2: LOOP PREPASS OVER PAIRS ---*/
+        for &j in &neighbors[i] {
+            assert_ne!(i, j);
+            /* TEST IF WITHIN OUTER CUTOFF */
+            let [dx, dy, dz] = distances[&(i, j)];
+            let rsqr = dx * dx + dy * dy + dz * dz;
+            if dx.abs() < self.a && dy.abs() < self.a && dz.abs() < self.a && rsqr < asqr {
+                let r = rsqr.sqrt();
+                /* PARTS OF TWO-BODY INTERACTION r<a */
+                num2[n2] = j;
+                let rinv = 1.0 / r;
+                let dxrinv = dx * rinv;
+                let dyrinv = dy * rinv;
+                let dzrinv = dz * rinv;
+                let rmainv = 1.0 / (r - self.a);
+                s2[n2].t0 = self.A * (self.sig * rmainv).exp();
+                s2[n2].t1 = (self.B * rinv).powf(self.rh);
+                s2[n2].t2 = self.rh * rinv;
+                s2[n2].t3 = self.sig * rmainv * rmainv;
+                s2[n2].dx = dxrinv;
+                s2[n2].dy = dyrinv;
+                s2[n2].dz = dzrinv;
+                s2[n2].r = r;
+                n2 += 1;
+
+                /* RADIAL PARTS OF THREE-BODY INTERACTION r<b */
+                if r < self.bg {
+                    num3[n3] = j;
+                    let rmbinv = 1.0 / (r - self.bg);
+                    let temp1 = self.gam * rmbinv;
+                    let temp0 = temp1.exp();
+                    s3[n3].g = temp0;
+                    s3[n3].dg = -rmbinv * temp1 * temp0;
+                    s3[n3].dx = dxrinv;
+                    s3[n3].dy = dyrinv;
+                    s3[n3].dz = dzrinv;
+                    s3[n3].rinv = rinv;
+                    s3[n3].r = r;
+                    n3 += 1;
+
+                    /* COORDINATION AND NEIGHBOR FUNCTION c<r<b */
+                    if r < self.b {
+                        if r < self.c {
+                            Z += 1.0;
+                        } else {
+                            let xinv = (self.b - self.c) / (r - self.c);
+                            let xinv3 = xinv.powi(3);
+                            let den = 1.0 / (1.0 - xinv3);
+                            let temp1 = self.alp * den;
+                            let fZ = temp1.exp();
+                            Z += fZ;
+                            numz[nz] = j;
+                            sz[nz].df = fZ * temp1 * den * 3.0 * xinv3 * xinv * cmb_inv; /* df/dr */
+                            sz[nz].dx = dxrinv;
+                            sz[nz].dy = dyrinv;
+                            sz[nz].dz = dzrinv;
+                            sz[nz].r = r;
+                            nz += 1;
+                        }
+                    }
+                }
+            }
+        }
+        (Z, n2, n3, nz)
+    }
+}
+// 44c1697e ends here
+
 // [[file:../edip.note::0c7bb6bc][0c7bb6bc]]
 /// Environment-dependence of pair interaction
 struct PairInteraction {
@@ -277,7 +368,6 @@ pub fn compute_forces_edip(
     let mut s3 = vec![Store3::default(); max_nbrs];
     /* coordination number stuff, c<r<b */
     let mut sz = vec![Storez::default(); max_nbrs];
-    // let mut szsum = vec![0.0; max_nbrs];
 
     /* INITIALIZE FORCES AND GLOBAL SUMS */
     for i in 0..n_own {
@@ -290,85 +380,12 @@ pub fn compute_forces_edip(
     let mut e_v3 = 0.0;
     let mut virial = 0.0;
 
-    /* COMBINE COEFFICIENTS */
-    let asqr = params.a.powi(2);
-    let qo_sqrt = params.Qo.sqrt();
-    let mu_half = params.mu * 0.5;
-    let u5 = u2 * u4;
-    let bmc = params.b - params.c;
-    let cmb_inv = 1.0 / (params.c - params.b);
-
     /*--- LEVEL 1: OUTER LOOP OVER ATOMS ---*/
     for i in 0..n_own {
         /* RESET COORDINATION AND NEIGHBOR NUMBERS */
-        let mut Z = 0.0;
-        let mut n2 = 0; /* size of s2[] */
-        let mut n3 = 0; /* size of s3[] */
-        let mut nz = 0; /* size of sz[] */
-
-        /*--- LEVEL 2: LOOP PREPASS OVER PAIRS ---*/
-        for &j in &neighbors[i] {
-            assert_ne!(i, j);
-            /* TEST IF WITHIN OUTER CUTOFF */
-            let [dx, dy, dz] = distances[&(i, j)];
-            let rsqr = dx * dx + dy * dy + dz * dz;
-            if dx.abs() < params.a && dy.abs() < params.a && dz.abs() < params.a && rsqr < asqr {
-                let r = rsqr.sqrt();
-                /* PARTS OF TWO-BODY INTERACTION r<a */
-                num2[n2] = j;
-                let rinv = 1.0 / r;
-                let dxrinv = dx * rinv;
-                let dyrinv = dy * rinv;
-                let dzrinv = dz * rinv;
-                let rmainv = 1.0 / (r - params.a);
-                s2[n2].t0 = params.A * (params.sig * rmainv).exp();
-                s2[n2].t1 = (params.B * rinv).powf(params.rh);
-                s2[n2].t2 = params.rh * rinv;
-                s2[n2].t3 = params.sig * rmainv * rmainv;
-                s2[n2].dx = dxrinv;
-                s2[n2].dy = dyrinv;
-                s2[n2].dz = dzrinv;
-                s2[n2].r = r;
-                n2 += 1;
-
-                /* RADIAL PARTS OF THREE-BODY INTERACTION r<b */
-                if r < params.bg {
-                    num3[n3] = j;
-                    let rmbinv = 1.0 / (r - params.bg);
-                    let temp1 = params.gam * rmbinv;
-                    let temp0 = temp1.exp();
-                    s3[n3].g = temp0;
-                    s3[n3].dg = -rmbinv * temp1 * temp0;
-                    s3[n3].dx = dxrinv;
-                    s3[n3].dy = dyrinv;
-                    s3[n3].dz = dzrinv;
-                    s3[n3].rinv = rinv;
-                    s3[n3].r = r;
-                    n3 += 1;
-
-                    /* COORDINATION AND NEIGHBOR FUNCTION c<r<b */
-                    if r < params.b {
-                        if r < params.c {
-                            Z += 1.0;
-                        } else {
-                            let xinv = bmc / (r - params.c);
-                            let xinv3 = xinv.powi(3);
-                            let den = 1.0 / (1.0 - xinv3);
-                            let temp1 = params.alp * den;
-                            let fZ = temp1.exp();
-                            Z += fZ;
-                            numz[nz] = j;
-                            sz[nz].df = fZ * temp1 * den * 3.0 * xinv3 * xinv * cmb_inv; /* df/dr */
-                            sz[nz].dx = dxrinv;
-                            sz[nz].dy = dyrinv;
-                            sz[nz].dz = dzrinv;
-                            sz[nz].r = r;
-                            nz += 1;
-                        }
-                    }
-                }
-            }
-        }
+        let (Z, n2, n3, nz) = params.compute_prepass(
+            &mut num2, &mut num3, &mut numz, &mut s2, &mut s3, &mut sz, neighbors, distances, i,
+        );
 
         /* ZERO ACCUMULATION ARRAY FOR ENVIRONMENT FORCES */
         // array to accumulate coordination force prefactors
@@ -386,11 +403,11 @@ pub fn compute_forces_edip(
         virial += v;
 
         /* COORDINATION-DEPENDENCE OF THREE-BODY INTERACTION */
-        let w_inv = qo_sqrt * (-mu_half * Z).exp(); /* inverse width of angular function */
-        let dw_inv = -mu_half * w_inv; /* its derivative */
+        let w_inv = params.Qo.sqrt() * (-0.5 * params.mu * Z).exp(); /* inverse width of angular function */
+        let dw_inv = -0.5 * params.mu * w_inv; /* its derivative */
         let temp0 = (-u4 * Z).exp();
         let tau = u1 + u2 * temp0 * (u3 - temp0); /* -cosine of angular minimum */
-        let dtau = u5 * temp0 * (2.0 * temp0 - u3); /* its derivative */
+        let dtau = u2 * u4 * temp0 * (2.0 * temp0 - u3); /* its derivative */
 
         let threebody = ThreeBodyInteraction {
             tau,

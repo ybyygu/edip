@@ -19,6 +19,7 @@ const u3: f64 = 0.286198;
 const u4: f64 = 0.66;
 
 /// Parameters for EDIP
+#[derive(Debug, Copy, Clone)]
 pub struct EdipParams {
     A: f64,
     B: f64,
