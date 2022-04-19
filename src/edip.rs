@@ -88,9 +88,16 @@ struct PairInteraction {
 }
 
 impl PairInteraction {
-    fn compute(&self, s2: &[Store2], sz: &mut [Storez], forces: &mut [Array3], i: usize, num2: &[usize]) -> (f64, f64) {
+    fn compute(
+        &self,
+        s2: &[Store2],
+        szsum: &mut [f64],
+        forces: &mut [Array3],
+        i: usize,
+        num2: &[usize],
+    ) -> (f64, f64) {
         let n2 = s2.len();
-        let nz = sz.len();
+        let nz = szsum.len();
         let pz = self.pz;
         let dp = self.dp;
 
@@ -120,8 +127,7 @@ impl PairInteraction {
             /*--- LEVEL 3: LOOP FOR PAIR COORDINATION FORCES ---*/
             let dV2dZ = -dp * s2[nj].t0;
             for nl in 0..nz {
-                // FIXME: slow
-                // sz[nl].sum += dV2dZ;
+                szsum[nl] += dV2dZ;
             }
         }
 
@@ -258,41 +264,14 @@ pub fn compute_forces_edip(
 
         /* ENVIRONMENT-DEPENDENCE OF PAIR INTERACTION */
         let temp0 = params.bet * Z;
-        let pz = params.palp * (-temp0 * Z).exp(); /* bond order */
-        let dp = -2.0 * temp0 * pz; /* derivative of bond order */
-        /*--- LEVEL 2: LOOP FOR PAIR INTERACTIONS ---*/
-        // FIXME: it is 3 time slower than before
-        // let pair_int = PairInteraction { pz, dp };
-        // let (e, v) = pair_int.compute(&s2, &mut sz, forces, i, &num2);
-        // e_v2 += e;
-        // virial += v;
-        for nj in 0..n2 {
-            let temp0 = s2[nj].t1 - pz;
-            /* two-body energy V2(rij,Z) */
-            e_v2 += temp0 * s2[nj].t0;
-
-            /* two-body forces */
-            let dV2j = -(s2[nj].t0) * ((s2[nj].t1) * (s2[nj].t2) + temp0 * (s2[nj].t3)); /* dV2/dr */
-            let dV2ijx = dV2j * s2[nj].dx;
-            let dV2ijy = dV2j * s2[nj].dy;
-            let dV2ijz = dV2j * s2[nj].dz;
-            forces[i][0] += dV2ijx;
-            forces[i][1] += dV2ijy;
-            forces[i][2] += dV2ijz;
-            let j = num2[nj];
-            forces[j][0] -= dV2ijx;
-            forces[j][1] -= dV2ijy;
-            forces[j][2] -= dV2ijz;
-
-            /* dV2/dr contribution to virial */
-            virial -= s2[nj].r * (dV2ijx * s2[nj].dx + dV2ijy * s2[nj].dy + dV2ijz * s2[nj].dz);
-
-            /*--- LEVEL 3: LOOP FOR PAIR COORDINATION FORCES ---*/
-            let dV2dZ = -dp * s2[nj].t0;
-            for nl in 0..nz {
-                szsum[nl] += dV2dZ;
-            }
-        }
+        // bond order
+        let pz = params.palp * (-temp0 * Z).exp();
+        // derivative of bond order
+        let dp = -2.0 * temp0 * pz;
+        let pair_int = PairInteraction { pz, dp };
+        let (e, v) = pair_int.compute(&s2, &mut szsum, forces, i, &num2);
+        e_v2 += e;
+        virial += v;
 
         /* COORDINATION-DEPENDENCE OF THREE-BODY INTERACTION */
         let w_inv = qo_sqrt * (-mu_half * Z).exp(); /* inverse width of angular function */
