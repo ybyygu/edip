@@ -31,83 +31,8 @@ eta = detla/Qo
 #![allow(non_upper_case_globals)]
 use super::*;
 
-use gut::prelude::*;
 use std::collections::{HashMap, HashSet};
-
-type Array3 = [f64; 3];
 // 178e12ff ends here
-
-// [[file:../edip.note::8a0e64b1][8a0e64b1]]
-// tau(Z) (Ismail & Kaxiras, 1993)
-const u1: f64 = -0.165799;
-const u2: f64 = 32.557;
-const u3: f64 = 0.286198;
-const u4: f64 = 0.66;
-
-/// Parameters for EDIP
-pub struct EdipParams {
-    A: f64,
-    B: f64,
-    rh: f64,
-    a: f64,
-    sig: f64,
-    lam: f64,
-    gam: f64,
-    b: f64,
-    c: f64,
-    mu: f64,
-    Qo: f64,
-    bet: f64,
-    alp: f64,
-    /// cutoff for g(r)
-    bg: f64,
-    /// justo prefactor for bond order
-    palp: f64,
-    delta: f64,
-    eta: f64,
-}
-
-impl EdipParams {
-    /// EDIP-Si Parameters
-    pub fn silicon() -> Self {
-        let A = 5.6714030;
-        let B = 2.0002804;
-        let rh = 1.2085196;
-        let a = 3.1213820;
-        let sig = 0.5774108;
-        let lam = 1.4533108;
-        let gam = 1.1247945;
-        let b = 3.1213820;
-        let c = 2.5609104;
-        let delta = 78.7590539;
-        let mu = 0.6966326;
-        let Qo = 312.1341346;
-        let palp = 1.4074424;
-        let bet = 0.0070975;
-        let alp = 3.1083847;
-
-        Self {
-            A,
-            B,
-            rh,
-            a,
-            sig,
-            lam,
-            gam,
-            b,
-            c,
-            delta,
-            mu,
-            Qo,
-            palp,
-            bet,
-            alp,
-            bg: a,
-            eta: delta / Qo,
-        }
-    }
-}
-// 8a0e64b1 ends here
 
 // [[file:../edip.note::d9088664][d9088664]]
 #[derive(Default, Clone)]
@@ -144,8 +69,6 @@ struct Store3 {
 struct Storez {
     // derivative of neighbor function f'(r)
     df: f64,
-    // array to accumulate coordination force prefactors
-    sum: f64,
     // unit separation vector
     dx: f64,
     dy: f64,
@@ -154,6 +77,58 @@ struct Storez {
     r: f64,
 }
 // d9088664 ends here
+
+// [[file:../edip.note::0c7bb6bc][0c7bb6bc]]
+/// Environment-dependence of pair interaction
+struct PairInteraction {
+    /// bond order
+    pz: f64,
+    /// derivative of bond order
+    dp: f64,
+}
+
+impl PairInteraction {
+    fn compute(&self, s2: &[Store2], sz: &mut [Storez], forces: &mut [Array3], i: usize, num2: &[usize]) -> (f64, f64) {
+        let n2 = s2.len();
+        let nz = sz.len();
+        let pz = self.pz;
+        let dp = self.dp;
+
+        let mut virial = 0.0;
+        let mut energy = 0.0;
+        for nj in 0..n2 {
+            let temp0 = s2[nj].t1 - pz;
+            /* two-body energy V2(rij,Z) */
+            energy += temp0 * s2[nj].t0;
+
+            /* two-body forces */
+            let dV2j = -(s2[nj].t0) * ((s2[nj].t1) * (s2[nj].t2) + temp0 * (s2[nj].t3)); /* dV2/dr */
+            let dV2ijx = dV2j * s2[nj].dx;
+            let dV2ijy = dV2j * s2[nj].dy;
+            let dV2ijz = dV2j * s2[nj].dz;
+            forces[i][0] += dV2ijx;
+            forces[i][1] += dV2ijy;
+            forces[i][2] += dV2ijz;
+            let j = num2[nj];
+            forces[j][0] -= dV2ijx;
+            forces[j][1] -= dV2ijy;
+            forces[j][2] -= dV2ijz;
+
+            /* dV2/dr contribution to virial */
+            virial -= s2[nj].r * (dV2ijx * s2[nj].dx + dV2ijy * s2[nj].dy + dV2ijz * s2[nj].dz);
+
+            /*--- LEVEL 3: LOOP FOR PAIR COORDINATION FORCES ---*/
+            let dV2dZ = -dp * s2[nj].t0;
+            for nl in 0..nz {
+                // FIXME: slow
+                // sz[nl].sum += dV2dZ;
+            }
+        }
+
+        (energy, virial)
+    }
+}
+// 0c7bb6bc ends here
 
 // [[file:../edip.note::9c60872a][9c60872a]]
 pub fn compute_forces_edip(
@@ -184,6 +159,7 @@ pub fn compute_forces_edip(
     let mut s3 = vec![Store3::default(); max_nbrs];
     /* coordination number stuff, c<r<b */
     let mut sz = vec![Storez::default(); max_nbrs];
+    // let mut szsum = vec![0.0; max_nbrs];
 
     /* INITIALIZE FORCES AND GLOBAL SUMS */
     for i in 0..n_own {
@@ -191,7 +167,6 @@ pub fn compute_forces_edip(
     }
 
     /* measurements in force routine */
-    let mut e_potential = 0.0;
     // e_potential = e_v2 + e_v3
     let mut e_v2 = 0.0;
     let mut e_v3 = 0.0;
@@ -278,15 +253,19 @@ pub fn compute_forces_edip(
         }
 
         /* ZERO ACCUMULATION ARRAY FOR ENVIRONMENT FORCES */
-        for nl in 0..nz {
-            sz[nl].sum = 0.0;
-        }
+        // array to accumulate coordination force prefactors
+        let mut szsum = vec![0.0; nz];
 
         /* ENVIRONMENT-DEPENDENCE OF PAIR INTERACTION */
         let temp0 = params.bet * Z;
         let pz = params.palp * (-temp0 * Z).exp(); /* bond order */
         let dp = -2.0 * temp0 * pz; /* derivative of bond order */
         /*--- LEVEL 2: LOOP FOR PAIR INTERACTIONS ---*/
+        // FIXME: it is 3 time slower than before
+        // let pair_int = PairInteraction { pz, dp };
+        // let (e, v) = pair_int.compute(&s2, &mut sz, forces, i, &num2);
+        // e_v2 += e;
+        // virial += v;
         for nj in 0..n2 {
             let temp0 = s2[nj].t1 - pz;
             /* two-body energy V2(rij,Z) */
@@ -311,7 +290,7 @@ pub fn compute_forces_edip(
             /*--- LEVEL 3: LOOP FOR PAIR COORDINATION FORCES ---*/
             let dV2dZ = -dp * s2[nj].t0;
             for nl in 0..nz {
-                sz[nl].sum += dV2dZ;
+                szsum[nl] += dV2dZ;
             }
         }
 
@@ -396,14 +375,14 @@ pub fn compute_forces_edip(
                 let dV3dZ = temp1 * dHdx * dxdZ;
                 /*--- LEVEL 4: LOOP FOR THREE-BODY COORDINATION FORCES ---*/
                 for nl in 0..nz {
-                    sz[nl].sum += dV3dZ;
+                    szsum[nl] += dV3dZ;
                 }
             }
         }
 
         /*--- LEVEL 2: LOOP TO APPLY COORDINATION FORCES ---*/
         for nl in 0..nz {
-            let dedrl = sz[nl].sum * sz[nl].df;
+            let dedrl = szsum[nl] * sz[nl].df;
             let dedrlx = dedrl * sz[nl].dx;
             let dedrly = dedrl * sz[nl].dy;
             let dedrlz = dedrl * sz[nl].dz;
