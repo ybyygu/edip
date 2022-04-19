@@ -79,15 +79,45 @@ struct Storez {
 // d9088664 ends here
 
 // [[file:../edip.note::44c1697e][44c1697e]]
-impl EdipParams {
+type PairData = (usize, f64, f64, f64, f64);
+type Distances = HashMap<(usize, usize), Array3>;
+type Neighbor = HashSet<usize>;
+
+// Get all pairs within cutoff in parallel (the most time-consuming part)
+fn collect_pairs_within_cutoff(neighbors: &[Neighbor], distances: &Distances, a: f64) -> Vec<Vec<PairData>> {
+    let asqr = a.powi(2);
+    (0..neighbors.len())
+        .into_par_iter()
+        .map(move |i| {
+            neighbors[i]
+                .par_iter()
+                .filter_map(move |&j| {
+                    if i != j {
+                        let [dx, dy, dz] = distances[&(i, j)];
+                        if dx.abs() < a && dy.abs() < a && dz.abs() < a {
+                            let rsqr = dx * dx + dy * dy + dz * dz;
+                            if rsqr < asqr {
+                                let r = rsqr.sqrt();
+                                return (j, r, dx, dy, dz).into();
+                            }
+                        }
+                    }
+                    None
+                })
+                .collect()
+        })
+        .collect()
+}
+
+impl EdipParameters {
     fn compute_prepass(
         self,
         s2: &mut HashMap<usize, Store2>,
         s3: &mut HashMap<usize, Store3>,
         sz: &mut HashMap<usize, Storez>,
-        neighbors: &[HashSet<usize>],
-        distances: &HashMap<(usize, usize), Array3>,
-        pairs_within_cutoff: &[(usize, f64, f64, f64, f64)],
+        neighbors: &[Neighbor],
+        distances: &Distances,
+        pairs_within_cutoff: &[PairData],
     ) -> f64 {
         // Reset Coordination And Neighbor Numbers
         let mut Z = 0.0;
@@ -225,7 +255,7 @@ impl ThreeBodyInteraction {
         s3: &HashMap<usize, Store3>,
         forces: &mut [Array3],
         i: usize,
-        params: &EdipParams,
+        params: &EdipParameters,
     ) -> (f64, f64, f64) {
         let tau = self.tau;
         let w_inv = self.w_inv;
@@ -321,18 +351,19 @@ pub fn compute_forces_edip(
     // The total forces to be computed
     forces: &mut [Array3],
     // A list of double counted neighbors of atom i (same indices as in the forces ).
-    neighbors: &[HashSet<usize>],
-    // Contains relative coordinates of atom j relative to its neighboring atom
-    // i. Will panic if no data for any pair of neighboring atoms i and j
-    distances: &HashMap<(usize, usize), Array3>,
+    neighbors: &[Neighbor],
+    // Contains relative coordinates of neighbors relative to central atom i.
+    distances: &Distances,
     // Parameter set for EDIP
-    params: &EdipParams,
+    params: &EdipParameters,
 ) -> (f64, f64) {
     // the total number of particles
     let n_own = forces.len();
     assert_eq!(neighbors.len(), n_own);
     assert!(!neighbors.is_empty(), "invalid neighbors: {neighbors:?}");
-    let max_nbrs = neighbors.iter().map(|x| x.len()).max().unwrap();
+
+    // Get all pairs within cutoff in parallel (the most time-consuming part)
+    let pairs_within_cutoff = collect_pairs_within_cutoff(neighbors, distances, params.a);
 
     let mut s2 = HashMap::new();
     let mut s3 = HashMap::new();
@@ -348,29 +379,6 @@ pub fn compute_forces_edip(
     let mut energy_v2 = 0.0;
     let mut energy_v3 = 0.0;
     let mut virial = 0.0;
-
-    // Get all pairs within cutoff in parallel (the most time-consuming part)
-    let asqr = params.a.powi(2);
-    let pairs_within_cutoff: Vec<Vec<_>> = (0..n_own)
-        .into_par_iter()
-        .map(move |i| {
-            neighbors[i]
-                .par_iter()
-                .filter_map(move |&j| {
-                    assert_ne!(i, j);
-                    let [dx, dy, dz] = distances[&(i, j)];
-                    if dx.abs() < params.a && dy.abs() < params.a && dz.abs() < params.a {
-                        let rsqr = dx * dx + dy * dy + dz * dz;
-                        if rsqr < asqr {
-                            let r = rsqr.sqrt();
-                            return (j, r, dx, dy, dz).into();
-                        }
-                    }
-                    None
-                })
-                .collect()
-        })
-        .collect();
 
     // outer loop over atoms
     for i in 0..n_own {
@@ -449,9 +457,7 @@ fn test_edip() -> Result<()> {
     let mut neighbors: Vec<HashSet<usize>> = vec![];
     let mut distances = HashMap::new();
     for i in 0..n {
-        let mut xx: HashSet<_> = (0..n).collect();
-        xx.remove(&i);
-        neighbors.push(xx.into_iter().collect());
+        neighbors.push((0..n).collect());
         for j in 0..n {
             if i != j {
                 let pi = positions[i];
@@ -465,7 +471,7 @@ fn test_edip() -> Result<()> {
     }
 
     let mut f = vec![[0.0; 3]; n];
-    let params = EdipParams::silicon();
+    let params = EdipParameters::silicon();
     let (energy, virial) = compute_forces_edip(&mut f, &neighbors, &distances, &params);
     approx::assert_relative_eq!(energy, -14.566606, epsilon = 1e-5);
     approx::assert_relative_eq!(virial, -3.643552, epsilon = 1e-5);

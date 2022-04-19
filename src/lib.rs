@@ -20,7 +20,7 @@ const u4: f64 = 0.66;
 
 /// Parameters for EDIP
 #[derive(Debug, Copy, Clone)]
-pub struct EdipParams {
+pub struct EdipParameters {
     A: f64,
     B: f64,
     rh: f64,
@@ -42,7 +42,7 @@ pub struct EdipParams {
     eta: f64,
 }
 
-impl EdipParams {
+impl EdipParameters {
     /// EDIP-Si Parameters
     pub fn silicon() -> Self {
         let A = 5.6714030;

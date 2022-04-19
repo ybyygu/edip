@@ -38,7 +38,7 @@ fn init() -> Result<(Vec<HashSet<usize>>, HashMap<(usize, usize), [f64; 3]>)> {
 fn silicon(neighbors: &[HashSet<usize>], distances: &HashMap<(usize, usize), [f64; 3]>) {
     let n = neighbors.len();
     let mut f = vec![[0.0; 3]; n];
-    let params = EdipParams::silicon();
+    let params = EdipParameters::silicon();
     let (_energy, _virial) = compute_forces_edip(&mut f, &neighbors, &distances, &params);
 }
 
