@@ -87,7 +87,7 @@ impl EdipParams {
         sz: &mut HashMap<usize, Storez>,
         neighbors: &[HashSet<usize>],
         distances: &HashMap<(usize, usize), Array3>,
-        i: usize,
+        pairs_within_cutoff: &[(usize, f64, f64, f64, f64)],
     ) -> f64 {
         // Reset Coordination And Neighbor Numbers
         let mut Z = 0.0;
@@ -98,25 +98,8 @@ impl EdipParams {
         s3.clear();
         sz.clear();
 
-        // Get all pairs within cutoff in parallel
-        let pairs_within_cutoff: Vec<_> = neighbors[i]
-            .par_iter()
-            .filter_map(|&j| {
-                assert_ne!(i, j);
-                let [dx, dy, dz] = distances[&(i, j)];
-                if dx.abs() < self.a && dy.abs() < self.a && dz.abs() < self.a {
-                    let rsqr = dx * dx + dy * dy + dz * dz;
-                    if rsqr < asqr {
-                        let r = rsqr.sqrt();
-                        return (i, j, r, dx, dy, dz).into();
-                    }
-                }
-                None
-            })
-            .collect();
-
         // parts of two-body interaction r<a
-        for &(i, j, r, dx, dy, dz) in pairs_within_cutoff.iter() {
+        for &(j, r, dx, dy, dz) in pairs_within_cutoff.iter() {
             let rinv = 1.0 / r;
             let dxrinv = dx * rinv;
             let dyrinv = dy * rinv;
@@ -366,10 +349,40 @@ pub fn compute_forces_edip(
     let mut energy_v3 = 0.0;
     let mut virial = 0.0;
 
+    // Get all pairs within cutoff in parallel (the most time-consuming part)
+    let asqr = params.a.powi(2);
+    let pairs_within_cutoff: Vec<Vec<_>> = (0..n_own)
+        .into_par_iter()
+        .map(move |i| {
+            neighbors[i]
+                .par_iter()
+                .filter_map(move |&j| {
+                    assert_ne!(i, j);
+                    let [dx, dy, dz] = distances[&(i, j)];
+                    if dx.abs() < params.a && dy.abs() < params.a && dz.abs() < params.a {
+                        let rsqr = dx * dx + dy * dy + dz * dz;
+                        if rsqr < asqr {
+                            let r = rsqr.sqrt();
+                            return (j, r, dx, dy, dz).into();
+                        }
+                    }
+                    None
+                })
+                .collect()
+        })
+        .collect();
+
     // outer loop over atoms
     for i in 0..n_own {
         // reset coordination and neighbor numbers
-        let Z = params.compute_prepass(&mut s2, &mut s3, &mut sz, neighbors, distances, i);
+        let Z = params.compute_prepass(
+            &mut s2,
+            &mut s3,
+            &mut sz,
+            neighbors,
+            distances,
+            pairs_within_cutoff[i].as_slice(),
+        );
 
         // environment-dependence of pair interaction
         let temp0 = params.bet * Z;
