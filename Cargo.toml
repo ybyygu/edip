@@ -1,7 +1,7 @@
 # [[file:edip.note::11f0794f][11f0794f]]
 [package]
 name = "edip"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2021"
 authors = ["Wenping Guo <ybyygu@gmail.com>"]
 

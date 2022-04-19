@@ -97,7 +97,7 @@ impl EdipParams {
         s2.clear();
         s3.clear();
         sz.clear();
-        // --- Loop Prepass Over Pairs ---
+        // loop prepass over pairs
         for &j in &neighbors[i] {
             assert_ne!(i, j);
             // Test if within outer cutoff
@@ -105,7 +105,7 @@ impl EdipParams {
             let rsqr = dx * dx + dy * dy + dz * dz;
             if dx.abs() < self.a && dy.abs() < self.a && dz.abs() < self.a && rsqr < asqr {
                 let r = rsqr.sqrt();
-                /* parts of two-body interaction r<a */
+                // parts of two-body interaction r<a
                 let rinv = 1.0 / r;
                 let dxrinv = dx * rinv;
                 let dyrinv = dy * rinv;
@@ -183,16 +183,10 @@ impl PairInteraction {
         let dp = self.dp;
 
         let mut virial = 0.0;
-        let mut energy = 0.0;
-        // accumulate coordination force prefactors
-        let mut sum = 0.0;
         for (&j, s2nj) in s2 {
-            let temp0 = s2nj.t1 - pz;
-            /* two-body energy V2(rij,Z) */
-            energy += temp0 * s2nj.t0;
-
-            /* two-body forces */
-            let dV2j = -(s2nj.t0) * ((s2nj.t1) * (s2nj.t2) + temp0 * (s2nj.t3)); /* dV2/dr */
+            // two-body forces
+            // dV2/dr
+            let dV2j = -s2nj.t0 * (s2nj.t1 * s2nj.t2 + (s2nj.t1 - pz) * s2nj.t3);
             let dV2ijx = dV2j * s2nj.dx;
             let dV2ijy = dV2j * s2nj.dy;
             let dV2ijz = dV2j * s2nj.dz;
@@ -203,13 +197,14 @@ impl PairInteraction {
             forces[j][1] -= dV2ijy;
             forces[j][2] -= dV2ijz;
 
-            /* dV2/dr contribution to virial */
+            // dV2/dr contribution to virial
             virial -= s2nj.r * (dV2ijx * s2nj.dx + dV2ijy * s2nj.dy + dV2ijz * s2nj.dz);
-
-            /*--- LEVEL 3: LOOP FOR PAIR COORDINATION FORCES ---*/
-            let dV2dZ = -dp * s2nj.t0;
-            sum += dV2dZ;
         }
+
+        // for pair coordination force prefactors
+        let sum = s2.values().map(|x| -dp * x.t0).sum();
+        // two-body energy V2(rij,Z)
+        let energy = s2.values().map(|x| (x.t1 - pz) * x.t0).sum();
 
         (energy, virial, sum)
     }
@@ -247,8 +242,6 @@ impl ThreeBodyInteraction {
         for p in s3.iter().combinations(2) {
             let (&j, s3nj) = p[0];
             let (&k, s3nk) = p[1];
-            // let j = s3nj.j;
-            // let k = s3nk.j;
             /* angular function h(l,Z) */
             let lcos = s3nj.dx * s3nk.dx + s3nj.dy * s3nk.dy + s3nj.dz * s3nk.dz;
             let x = (lcos + tau) * w_inv;
@@ -308,11 +301,11 @@ impl ThreeBodyInteraction {
             forces[i][1] += fjy + fky;
             forces[i][2] += fjz + fkz;
 
-            /* dV3/dR contributions to virial */
+            // dV3/dR contributions to virial
             virial -= s3nj.r * (fjx * s3nj.dx + fjy * s3nj.dy + fjz * s3nj.dz);
             virial -= s3nk.r * (fkx * s3nk.dx + fky * s3nk.dy + fkz * s3nk.dz);
 
-            /* prefactor for 4-body forces from coordination */
+            // Prefactor for 4-body forces from coordination
             let dxdZ = dw_inv * (lcos + tau) + w_inv * dtau;
             let dV3dZ = temp1 * dHdx * dxdZ;
             // Three-Body Coordination Forces
@@ -344,7 +337,7 @@ pub fn compute_forces_edip(
 
     let mut s2 = HashMap::new();
     let mut s3 = HashMap::new();
-    /* coordination number stuff, c<r<b */
+    // Coordination number stuff, c<r<b
     let mut sz = HashMap::new();
 
     // Initialize forces
@@ -401,7 +394,7 @@ pub fn compute_forces_edip(
             forces[l][1] -= dedrly;
             forces[l][2] -= dedrlz;
 
-            /* dE/dZ*dZ/dr contribution to virial */
+            // dE/dZ*dZ/dr contribution to virial
             virial -= sznl.r * (dedrlx * sznl.dx + dedrly * sznl.dy + dedrlz * sznl.dz);
         }
     }
