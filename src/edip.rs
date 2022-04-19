@@ -35,7 +35,7 @@ use std::collections::{HashMap, HashSet};
 // 178e12ff ends here
 
 // [[file:../edip.note::d9088664][d9088664]]
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Copy)]
 struct Store2 {
     // various V2 functions and derivatives
     t0: f64,
@@ -50,7 +50,7 @@ struct Store2 {
     r: f64,
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Copy)]
 struct Store3 {
     // 3-body radial function and its derivative
     g: f64,
@@ -65,7 +65,7 @@ struct Store3 {
     r: f64,
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Copy)]
 struct Storez {
     // derivative of neighbor function f'(r)
     df: f64,
@@ -82,66 +82,64 @@ struct Storez {
 impl EdipParams {
     fn compute_prepass(
         self,
-        num2: &mut [usize],
-        num3: &mut [usize],
-        numz: &mut [usize],
-        s2: &mut [Store2],
-        s3: &mut [Store3],
-        sz: &mut [Storez],
+        s2: &mut HashMap<usize, Store2>,
+        s3: &mut HashMap<usize, Store3>,
+        sz: &mut HashMap<usize, Storez>,
         neighbors: &[HashSet<usize>],
         distances: &HashMap<(usize, usize), Array3>,
         i: usize,
-    ) -> (f64, usize, usize, usize) {
-        /*--- LEVEL 1: OUTER LOOP OVER ATOMS ---*/
-        /* RESET COORDINATION AND NEIGHBOR NUMBERS */
+    ) -> f64 {
+        // Reset Coordination And Neighbor Numbers
         let mut Z = 0.0;
-        let mut n2 = 0; /* size of s2[] */
-        let mut n3 = 0; /* size of s3[] */
-        let mut nz = 0; /* size of sz[] */
 
         let cmb_inv = 1.0 / (self.c - self.b);
         let asqr = self.a.powi(2);
-        /*--- LEVEL 2: LOOP PREPASS OVER PAIRS ---*/
+        s2.clear();
+        s3.clear();
+        sz.clear();
+        // --- Loop Prepass Over Pairs ---
         for &j in &neighbors[i] {
             assert_ne!(i, j);
-            /* TEST IF WITHIN OUTER CUTOFF */
+            // Test if within outer cutoff
             let [dx, dy, dz] = distances[&(i, j)];
             let rsqr = dx * dx + dy * dy + dz * dz;
             if dx.abs() < self.a && dy.abs() < self.a && dz.abs() < self.a && rsqr < asqr {
                 let r = rsqr.sqrt();
-                /* PARTS OF TWO-BODY INTERACTION r<a */
-                num2[n2] = j;
+                /* parts of two-body interaction r<a */
                 let rinv = 1.0 / r;
                 let dxrinv = dx * rinv;
                 let dyrinv = dy * rinv;
                 let dzrinv = dz * rinv;
                 let rmainv = 1.0 / (r - self.a);
-                s2[n2].t0 = self.A * (self.sig * rmainv).exp();
-                s2[n2].t1 = (self.B * rinv).powf(self.rh);
-                s2[n2].t2 = self.rh * rinv;
-                s2[n2].t3 = self.sig * rmainv * rmainv;
-                s2[n2].dx = dxrinv;
-                s2[n2].dy = dyrinv;
-                s2[n2].dz = dzrinv;
-                s2[n2].r = r;
-                n2 += 1;
+                let temp = Store2 {
+                    t0: self.A * (self.sig * rmainv).exp(),
+                    t1: (self.B * rinv).powf(self.rh),
+                    t2: self.rh * rinv,
+                    t3: self.sig * rmainv * rmainv,
+                    dx: dxrinv,
+                    dy: dyrinv,
+                    dz: dzrinv,
+                    r,
+                };
+                s2.insert(j, temp);
 
-                /* RADIAL PARTS OF THREE-BODY INTERACTION r<b */
+                // radial parts of three-body interaction r<b
                 if r < self.bg {
-                    num3[n3] = j;
                     let rmbinv = 1.0 / (r - self.bg);
                     let temp1 = self.gam * rmbinv;
                     let temp0 = temp1.exp();
-                    s3[n3].g = temp0;
-                    s3[n3].dg = -rmbinv * temp1 * temp0;
-                    s3[n3].dx = dxrinv;
-                    s3[n3].dy = dyrinv;
-                    s3[n3].dz = dzrinv;
-                    s3[n3].rinv = rinv;
-                    s3[n3].r = r;
-                    n3 += 1;
+                    let temp = Store3 {
+                        dx: dxrinv,
+                        dy: dyrinv,
+                        dz: dzrinv,
+                        dg: -rmbinv * temp1 * temp0,
+                        g: temp0,
+                        rinv,
+                        r,
+                    };
+                    s3.insert(j, temp);
 
-                    /* COORDINATION AND NEIGHBOR FUNCTION c<r<b */
+                    // coordination and neighbor function c<r<b
                     if r < self.b {
                         if r < self.c {
                             Z += 1.0;
@@ -152,19 +150,20 @@ impl EdipParams {
                             let temp1 = self.alp * den;
                             let fZ = temp1.exp();
                             Z += fZ;
-                            numz[nz] = j;
-                            sz[nz].df = fZ * temp1 * den * 3.0 * xinv3 * xinv * cmb_inv; /* df/dr */
-                            sz[nz].dx = dxrinv;
-                            sz[nz].dy = dyrinv;
-                            sz[nz].dz = dzrinv;
-                            sz[nz].r = r;
-                            nz += 1;
+                            let temp = Storez {
+                                dx: dxrinv,
+                                dy: dyrinv,
+                                dz: dzrinv,
+                                df: fZ * temp1 * den * 3.0 * xinv3 * xinv * cmb_inv, /* df/dr */
+                                r,
+                            };
+                            sz.insert(j, temp);
                         }
                     }
                 }
             }
         }
-        (Z, n2, n3, nz)
+        Z
     }
 }
 // 44c1697e ends here
@@ -179,50 +178,40 @@ struct PairInteraction {
 }
 
 impl PairInteraction {
-    fn compute(
-        &self,
-        s2: &[Store2],
-        szsum: &mut [f64],
-        forces: &mut [Array3],
-        i: usize,
-        num2: &[usize],
-    ) -> (f64, f64) {
-        let n2 = s2.len();
-        let nz = szsum.len();
+    fn compute(&self, s2: &HashMap<usize, Store2>, forces: &mut [Array3], i: usize) -> (f64, f64, f64) {
         let pz = self.pz;
         let dp = self.dp;
 
         let mut virial = 0.0;
         let mut energy = 0.0;
-        for nj in 0..n2 {
-            let temp0 = s2[nj].t1 - pz;
+        // accumulate coordination force prefactors
+        let mut sum = 0.0;
+        for (&j, s2nj) in s2 {
+            let temp0 = s2nj.t1 - pz;
             /* two-body energy V2(rij,Z) */
-            energy += temp0 * s2[nj].t0;
+            energy += temp0 * s2nj.t0;
 
             /* two-body forces */
-            let dV2j = -(s2[nj].t0) * ((s2[nj].t1) * (s2[nj].t2) + temp0 * (s2[nj].t3)); /* dV2/dr */
-            let dV2ijx = dV2j * s2[nj].dx;
-            let dV2ijy = dV2j * s2[nj].dy;
-            let dV2ijz = dV2j * s2[nj].dz;
+            let dV2j = -(s2nj.t0) * ((s2nj.t1) * (s2nj.t2) + temp0 * (s2nj.t3)); /* dV2/dr */
+            let dV2ijx = dV2j * s2nj.dx;
+            let dV2ijy = dV2j * s2nj.dy;
+            let dV2ijz = dV2j * s2nj.dz;
             forces[i][0] += dV2ijx;
             forces[i][1] += dV2ijy;
             forces[i][2] += dV2ijz;
-            let j = num2[nj];
             forces[j][0] -= dV2ijx;
             forces[j][1] -= dV2ijy;
             forces[j][2] -= dV2ijz;
 
             /* dV2/dr contribution to virial */
-            virial -= s2[nj].r * (dV2ijx * s2[nj].dx + dV2ijy * s2[nj].dy + dV2ijz * s2[nj].dz);
+            virial -= s2nj.r * (dV2ijx * s2nj.dx + dV2ijy * s2nj.dy + dV2ijz * s2nj.dz);
 
             /*--- LEVEL 3: LOOP FOR PAIR COORDINATION FORCES ---*/
-            let dV2dZ = -dp * s2[nj].t0;
-            for nl in 0..nz {
-                szsum[nl] += dV2dZ;
-            }
+            let dV2dZ = -dp * s2nj.t0;
+            sum += dV2dZ;
         }
 
-        (energy, virial)
+        (energy, virial, sum)
     }
 }
 // 0c7bb6bc ends here
@@ -239,102 +228,98 @@ struct ThreeBodyInteraction {
 impl ThreeBodyInteraction {
     fn compute(
         &self,
-        s3: &[Store3],
-        szsum: &mut [f64],
+        s3: &HashMap<usize, Store3>,
         forces: &mut [Array3],
         i: usize,
-        num3: &[usize],
-        n3: usize,
-        nz: usize,
         params: &EdipParams,
-    ) -> (f64, f64) {
+    ) -> (f64, f64, f64) {
         let tau = self.tau;
         let w_inv = self.w_inv;
         let dw_inv = self.dw_inv;
         let dtau = self.dtau;
         let temp0 = self.temp0;
 
-        /*--- LEVEL 2: FIRST LOOP FOR THREE-BODY INTERACTIONS ---*/
+        // --- Level 2: First Loop For Three-Body Interactions ---
         let mut virial = 0.0;
         let mut e_v3 = 0.0;
-        for nj in 0..(n3 - 1) {
-            let j = num3[nj];
-            /*--- LEVEL 3: SECOND LOOP FOR THREE-BODY INTERACTIONS ---*/
-            for nk in (nj + 1)..n3 {
-                let k = num3[nk];
-                /* angular function h(l,Z) */
-                let lcos = s3[nj].dx * s3[nk].dx + s3[nj].dy * s3[nk].dy + s3[nj].dz * s3[nk].dz;
-                let x = (lcos + tau) * w_inv;
-                let temp0 = (-x * x).exp();
+        // accumulate coordination force prefactors
+        let mut sum = 0.0;
+        for p in s3.iter().combinations(2) {
+            let (&j, s3nj) = p[0];
+            let (&k, s3nk) = p[1];
+            // let j = s3nj.j;
+            // let k = s3nk.j;
+            /* angular function h(l,Z) */
+            let lcos = s3nj.dx * s3nk.dx + s3nj.dy * s3nk.dy + s3nj.dz * s3nk.dz;
+            let x = (lcos + tau) * w_inv;
+            let temp0 = (-x * x).exp();
 
-                let H = params.lam * (1.0 - temp0 + params.eta * x * x);
-                let dHdx = 2.0 * params.lam * x * (temp0 + params.eta);
-                let dhdl = dHdx * w_inv;
+            let H = params.lam * (1.0 - temp0 + params.eta * x * x);
+            let dHdx = 2.0 * params.lam * x * (temp0 + params.eta);
+            let dhdl = dHdx * w_inv;
 
-                /* three-body energy */
-                let temp1 = s3[nj].g * s3[nk].g;
-                e_v3 += temp1 * H;
+            // three-body energy
+            let temp1 = s3nj.g * s3nk.g;
+            e_v3 += temp1 * H;
 
-                /* (-) radial force on atom j */
-                let dV3rij = s3[nj].dg * s3[nk].g * H;
-                let dV3rijx = dV3rij * s3[nj].dx;
-                let dV3rijy = dV3rij * s3[nj].dy;
-                let dV3rijz = dV3rij * s3[nj].dz;
-                let mut fjx = dV3rijx;
-                let mut fjy = dV3rijy;
-                let mut fjz = dV3rijz;
+            // (-) radial force on atom j
+            let dV3rij = s3nj.dg * s3nk.g * H;
+            let dV3rijx = dV3rij * s3nj.dx;
+            let dV3rijy = dV3rij * s3nj.dy;
+            let dV3rijz = dV3rij * s3nj.dz;
+            let mut fjx = dV3rijx;
+            let mut fjy = dV3rijy;
+            let mut fjz = dV3rijz;
 
-                /* (-) radial force on atom k */
-                let dV3rik = s3[nj].g * s3[nk].dg * H;
-                let dV3rikx = dV3rik * s3[nk].dx;
-                let dV3riky = dV3rik * s3[nk].dy;
-                let dV3rikz = dV3rik * s3[nk].dz;
-                let mut fkx = dV3rikx;
-                let mut fky = dV3riky;
-                let mut fkz = dV3rikz;
+            // (-) radial force on atom k
+            let dV3rik = s3nj.g * s3nk.dg * H;
+            let dV3rikx = dV3rik * s3nk.dx;
+            let dV3riky = dV3rik * s3nk.dy;
+            let dV3rikz = dV3rik * s3nk.dz;
+            let mut fkx = dV3rikx;
+            let mut fky = dV3riky;
+            let mut fkz = dV3rikz;
 
-                /* (-) angular force on j */
-                let dV3l = temp1 * dhdl;
-                let dV3ljx = dV3l * (s3[nk].dx - lcos * s3[nj].dx) * s3[nj].rinv;
-                let dV3ljy = dV3l * (s3[nk].dy - lcos * s3[nj].dy) * s3[nj].rinv;
-                let dV3ljz = dV3l * (s3[nk].dz - lcos * s3[nj].dz) * s3[nj].rinv;
-                fjx += dV3ljx;
-                fjy += dV3ljy;
-                fjz += dV3ljz;
+            // (-) angular force on j
+            let dV3l = temp1 * dhdl;
+            let dV3ljx = dV3l * (s3nk.dx - lcos * s3nj.dx) * s3nj.rinv;
+            let dV3ljy = dV3l * (s3nk.dy - lcos * s3nj.dy) * s3nj.rinv;
+            let dV3ljz = dV3l * (s3nk.dz - lcos * s3nj.dz) * s3nj.rinv;
+            fjx += dV3ljx;
+            fjy += dV3ljy;
+            fjz += dV3ljz;
 
-                /* (-) angular force on k */
-                let dV3lkx = dV3l * (s3[nj].dx - lcos * s3[nk].dx) * s3[nk].rinv;
-                let dV3lky = dV3l * (s3[nj].dy - lcos * s3[nk].dy) * s3[nk].rinv;
-                let dV3lkz = dV3l * (s3[nj].dz - lcos * s3[nk].dz) * s3[nk].rinv;
-                fkx += dV3lkx;
-                fky += dV3lky;
-                fkz += dV3lkz;
+            // (-) angular force on k
+            let dV3lkx = dV3l * (s3nj.dx - lcos * s3nk.dx) * s3nk.rinv;
+            let dV3lky = dV3l * (s3nj.dy - lcos * s3nk.dy) * s3nk.rinv;
+            let dV3lkz = dV3l * (s3nj.dz - lcos * s3nk.dz) * s3nk.rinv;
+            fkx += dV3lkx;
+            fky += dV3lky;
+            fkz += dV3lkz;
 
-                /* apply radial + angular forces to i, j, k */
-                forces[j][0] -= fjx;
-                forces[j][1] -= fjy;
-                forces[j][2] -= fjz;
-                forces[k][0] -= fkx;
-                forces[k][1] -= fky;
-                forces[k][2] -= fkz;
-                forces[i][0] += fjx + fkx;
-                forces[i][1] += fjy + fky;
-                forces[i][2] += fjz + fkz;
+            // apply radial + angular forces to i, j, k
+            forces[j][0] -= fjx;
+            forces[j][1] -= fjy;
+            forces[j][2] -= fjz;
+            forces[k][0] -= fkx;
+            forces[k][1] -= fky;
+            forces[k][2] -= fkz;
+            forces[i][0] += fjx + fkx;
+            forces[i][1] += fjy + fky;
+            forces[i][2] += fjz + fkz;
 
-                /* dV3/dR contributions to virial */
-                virial -= s3[nj].r * (fjx * s3[nj].dx + fjy * s3[nj].dy + fjz * s3[nj].dz);
-                virial -= s3[nk].r * (fkx * s3[nk].dx + fky * s3[nk].dy + fkz * s3[nk].dz);
+            /* dV3/dR contributions to virial */
+            virial -= s3nj.r * (fjx * s3nj.dx + fjy * s3nj.dy + fjz * s3nj.dz);
+            virial -= s3nk.r * (fkx * s3nk.dx + fky * s3nk.dy + fkz * s3nk.dz);
 
-                /* prefactor for 4-body forces from coordination */
-                let dxdZ = dw_inv * (lcos + tau) + w_inv * dtau;
-                let dV3dZ = temp1 * dHdx * dxdZ;
-                /*--- LEVEL 4: LOOP FOR THREE-BODY COORDINATION FORCES ---*/
-                for nl in 0..nz {
-                    szsum[nl] += dV3dZ;
-                }
-            }
+            /* prefactor for 4-body forces from coordination */
+            let dxdZ = dw_inv * (lcos + tau) + w_inv * dtau;
+            let dV3dZ = temp1 * dHdx * dxdZ;
+            // Three-Body Coordination Forces
+            sum += dV3dZ;
         }
-        (e_v3, virial)
+
+        (e_v3, virial, sum)
     }
 }
 // 1c360840 ends here
@@ -357,88 +342,70 @@ pub fn compute_forces_edip(
     assert!(!neighbors.is_empty(), "invalid neighbors: {neighbors:?}");
     let max_nbrs = neighbors.iter().map(|x| x.len()).max().unwrap();
 
-    /* atom ID numbers for s2[] */
-    let mut num2 = vec![0; max_nbrs];
-    /* atom ID numbers for s3[] */
-    let mut num3 = vec![0; max_nbrs];
-    /* atom ID numbers for sz[] */
-    let mut numz = vec![0; max_nbrs];
-
-    let mut s2 = vec![Store2::default(); max_nbrs];
-    let mut s3 = vec![Store3::default(); max_nbrs];
+    let mut s2 = HashMap::new();
+    let mut s3 = HashMap::new();
     /* coordination number stuff, c<r<b */
-    let mut sz = vec![Storez::default(); max_nbrs];
+    let mut sz = HashMap::new();
 
-    /* INITIALIZE FORCES AND GLOBAL SUMS */
+    // Initialize forces
     for i in 0..n_own {
         forces[i] = [0.0; 3];
     }
 
-    /* measurements in force routine */
-    // e_potential = e_v2 + e_v3
-    let mut e_v2 = 0.0;
-    let mut e_v3 = 0.0;
+    // e_potential = energy_v2 + energy_v3
+    let mut energy_v2 = 0.0;
+    let mut energy_v3 = 0.0;
     let mut virial = 0.0;
 
-    /*--- LEVEL 1: OUTER LOOP OVER ATOMS ---*/
+    // outer loop over atoms
     for i in 0..n_own {
-        /* RESET COORDINATION AND NEIGHBOR NUMBERS */
-        let (Z, n2, n3, nz) = params.compute_prepass(
-            &mut num2, &mut num3, &mut numz, &mut s2, &mut s3, &mut sz, neighbors, distances, i,
-        );
+        // reset coordination and neighbor numbers
+        let Z = params.compute_prepass(&mut s2, &mut s3, &mut sz, neighbors, distances, i);
 
-        /* ZERO ACCUMULATION ARRAY FOR ENVIRONMENT FORCES */
-        // array to accumulate coordination force prefactors
-        let mut szsum = vec![0.0; nz];
-
-        /* ENVIRONMENT-DEPENDENCE OF PAIR INTERACTION */
+        // environment-dependence of pair interaction
         let temp0 = params.bet * Z;
         // bond order
         let pz = params.palp * (-temp0 * Z).exp();
         // derivative of bond order
         let dp = -2.0 * temp0 * pz;
         let pair_int = PairInteraction { pz, dp };
-        let (e, v) = pair_int.compute(&s2, &mut szsum, forces, i, &num2);
-        e_v2 += e;
+        let (e, v, sum_s2) = pair_int.compute(&s2, forces, i);
+        energy_v2 += e;
         virial += v;
 
-        /* COORDINATION-DEPENDENCE OF THREE-BODY INTERACTION */
-        let w_inv = params.Qo.sqrt() * (-0.5 * params.mu * Z).exp(); /* inverse width of angular function */
-        let dw_inv = -0.5 * params.mu * w_inv; /* its derivative */
+        // coordination-dependence of three-body interaction
         let temp0 = (-u4 * Z).exp();
-        let tau = u1 + u2 * temp0 * (u3 - temp0); /* -cosine of angular minimum */
-        let dtau = u2 * u4 * temp0 * (2.0 * temp0 - u3); /* its derivative */
-
+        let w_inv = params.Qo.sqrt() * (-0.5 * params.mu * Z).exp(); /* inverse width of angular function */
         let threebody = ThreeBodyInteraction {
-            tau,
-            dtau,
             temp0,
             w_inv,
-            dw_inv,
+            tau: u1 + u2 * temp0 * (u3 - temp0), /* -cosine of angular minimum */
+            dtau: u2 * u4 * temp0 * (2.0 * temp0 - u3), /* its derivative */
+            dw_inv: -0.5 * params.mu * w_inv,    /* its derivative */
         };
-        let (e, v) = threebody.compute(&s3, &mut szsum, forces, i, &num3, n3, nz, &params);
-        e_v3 += e;
+        let (e, v, sum_s3) = threebody.compute(&s3, forces, i, &params);
+        energy_v3 += e;
         virial += v;
 
-        /*--- LEVEL 2: LOOP TO APPLY COORDINATION FORCES ---*/
-        for nl in 0..nz {
-            let dedrl = szsum[nl] * sz[nl].df;
-            let dedrlx = dedrl * sz[nl].dx;
-            let dedrly = dedrl * sz[nl].dy;
-            let dedrlz = dedrl * sz[nl].dz;
+        // loop to apply coordination forces
+        let psum = sum_s2 + sum_s3;
+        for (&l, sznl) in &sz {
+            let dedrl = psum * sznl.df;
+            let dedrlx = dedrl * sznl.dx;
+            let dedrly = dedrl * sznl.dy;
+            let dedrlz = dedrl * sznl.dz;
             forces[i][0] += dedrlx;
             forces[i][1] += dedrly;
             forces[i][2] += dedrlz;
-            let l = numz[nl];
             forces[l][0] -= dedrlx;
             forces[l][1] -= dedrly;
             forces[l][2] -= dedrlz;
 
             /* dE/dZ*dZ/dr contribution to virial */
-            virial -= sz[nl].r * (dedrlx * sz[nl].dx + dedrly * sz[nl].dy + dedrlz * sz[nl].dz);
+            virial -= sznl.r * (dedrlx * sznl.dx + dedrly * sznl.dy + dedrlz * sznl.dz);
         }
     }
-    let e_potential = e_v2 + e_v3;
+    let e_potential = energy_v2 + energy_v3;
     virial /= 3.0;
 
     (e_potential, virial)
