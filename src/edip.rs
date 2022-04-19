@@ -97,72 +97,88 @@ impl EdipParams {
         s2.clear();
         s3.clear();
         sz.clear();
-        // loop prepass over pairs
-        for &j in &neighbors[i] {
-            assert_ne!(i, j);
-            // Test if within outer cutoff
-            let [dx, dy, dz] = distances[&(i, j)];
-            let rsqr = dx * dx + dy * dy + dz * dz;
-            if dx.abs() < self.a && dy.abs() < self.a && dz.abs() < self.a && rsqr < asqr {
-                let r = rsqr.sqrt();
-                // parts of two-body interaction r<a
+
+        // Get all pairs within cutoff in parallel
+        let pairs_within_cutoff: Vec<_> = neighbors[i]
+            .par_iter()
+            .filter_map(|&j| {
+                assert_ne!(i, j);
+                let [dx, dy, dz] = distances[&(i, j)];
+                if dx.abs() < self.a && dy.abs() < self.a && dz.abs() < self.a {
+                    let rsqr = dx * dx + dy * dy + dz * dz;
+                    if rsqr < asqr {
+                        let r = rsqr.sqrt();
+                        return (i, j, r, dx, dy, dz).into();
+                    }
+                }
+                None
+            })
+            .collect();
+
+        // parts of two-body interaction r<a
+        for &(i, j, r, dx, dy, dz) in pairs_within_cutoff.iter() {
+            let rinv = 1.0 / r;
+            let dxrinv = dx * rinv;
+            let dyrinv = dy * rinv;
+            let dzrinv = dz * rinv;
+            let rmainv = 1.0 / (r - self.a);
+            let temp = Store2 {
+                t0: self.A * (self.sig * rmainv).exp(),
+                t1: (self.B * rinv).powf(self.rh),
+                t2: self.rh * rinv,
+                t3: self.sig * rmainv * rmainv,
+                dx: dxrinv,
+                dy: dyrinv,
+                dz: dzrinv,
+                r,
+            };
+            s2.insert(j, temp);
+        }
+
+        // radial parts of three-body interaction r<b
+        for (&j, &Store2 { dx, dy, dz, r, .. }) in s2.iter() {
+            if r < self.bg {
                 let rinv = 1.0 / r;
-                let dxrinv = dx * rinv;
-                let dyrinv = dy * rinv;
-                let dzrinv = dz * rinv;
-                let rmainv = 1.0 / (r - self.a);
-                let temp = Store2 {
-                    t0: self.A * (self.sig * rmainv).exp(),
-                    t1: (self.B * rinv).powf(self.rh),
-                    t2: self.rh * rinv,
-                    t3: self.sig * rmainv * rmainv,
-                    dx: dxrinv,
-                    dy: dyrinv,
-                    dz: dzrinv,
+                let rmbinv = 1.0 / (r - self.bg);
+                let temp1 = self.gam * rmbinv;
+                let temp0 = temp1.exp();
+                let temp = Store3 {
+                    dx,
+                    dy,
+                    dz,
+                    dg: -rmbinv * temp1 * temp0,
+                    g: temp0,
+                    rinv,
                     r,
                 };
-                s2.insert(j, temp);
+                s3.insert(j, temp);
+            }
+        }
 
-                // radial parts of three-body interaction r<b
-                if r < self.bg {
-                    let rmbinv = 1.0 / (r - self.bg);
-                    let temp1 = self.gam * rmbinv;
-                    let temp0 = temp1.exp();
-                    let temp = Store3 {
-                        dx: dxrinv,
-                        dy: dyrinv,
-                        dz: dzrinv,
-                        dg: -rmbinv * temp1 * temp0,
-                        g: temp0,
-                        rinv,
+        // coordination and neighbor function c<r<b
+        for (&j, &Store3 { dx, dy, dz, r, .. }) in s3.iter() {
+            if r < self.b {
+                if r < self.c {
+                    Z += 1.0;
+                } else {
+                    let xinv = (self.b - self.c) / (r - self.c);
+                    let xinv3 = xinv.powi(3);
+                    let den = 1.0 / (1.0 - xinv3);
+                    let temp1 = self.alp * den;
+                    let fZ = temp1.exp();
+                    Z += fZ;
+                    let temp = Storez {
+                        dx,
+                        dy,
+                        dz,
+                        df: fZ * temp1 * den * 3.0 * xinv3 * xinv * cmb_inv, /* df/dr */
                         r,
                     };
-                    s3.insert(j, temp);
-
-                    // coordination and neighbor function c<r<b
-                    if r < self.b {
-                        if r < self.c {
-                            Z += 1.0;
-                        } else {
-                            let xinv = (self.b - self.c) / (r - self.c);
-                            let xinv3 = xinv.powi(3);
-                            let den = 1.0 / (1.0 - xinv3);
-                            let temp1 = self.alp * den;
-                            let fZ = temp1.exp();
-                            Z += fZ;
-                            let temp = Storez {
-                                dx: dxrinv,
-                                dy: dyrinv,
-                                dz: dzrinv,
-                                df: fZ * temp1 * den * 3.0 * xinv3 * xinv * cmb_inv, /* df/dr */
-                                r,
-                            };
-                            sz.insert(j, temp);
-                        }
-                    }
+                    sz.insert(j, temp);
                 }
             }
         }
+
         Z
     }
 }
