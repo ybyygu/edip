@@ -79,10 +79,10 @@ struct Storez {
 // d9088664 ends here
 
 // [[file:../edip.note::44c1697e][44c1697e]]
-type PairData = (usize, f64, f64, f64, f64);
-type Distances = HashMap<(usize, usize), Array3>;
-type Neighbor = HashSet<usize>;
+pub type Distances = HashMap<(usize, usize), Array3>;
+pub type Neighbor = HashSet<usize>;
 
+type PairData = (usize, f64, f64, f64, f64);
 // Get all pairs within cutoff in parallel (the most time-consuming part)
 fn collect_pairs_within_cutoff(neighbors: &[Neighbor], distances: &Distances, a: f64) -> Vec<Vec<PairData>> {
     let asqr = a.powi(2);
@@ -347,14 +347,21 @@ impl ThreeBodyInteraction {
 // 1c360840 ends here
 
 // [[file:../edip.note::9c60872a][9c60872a]]
+/// Compute energy and forces using Environment-dependent interatomic potential (EDIP) by M.Z. Bazant.
+///
+/// # Parameters
+///
+/// * forces: the total forces to be computed.
+/// * neighbors: a list of double counted neighbors of each atom i (same indices as in the forces ).
+/// * distances: Contains relative coordinates of neighbors relative to central atom i.
+/// * params: parameter set used for computation.
+///
+/// Returns computed potential energy and virial.
+///
 pub fn compute_forces_edip(
-    // The total forces to be computed
     forces: &mut [Array3],
-    // A list of double counted neighbors of atom i (same indices as in the forces ).
     neighbors: &[Neighbor],
-    // Contains relative coordinates of neighbors relative to central atom i.
     distances: &Distances,
-    // Parameter set for EDIP
     params: &EdipParameters,
 ) -> (f64, f64) {
     // the total number of particles
