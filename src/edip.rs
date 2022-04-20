@@ -1,31 +1,3 @@
-// [[file:../edip.note::83a3f290][83a3f290]]
-/* EDIP Si PARAMETERS Justo et al., Phys. Rev. B 58, 2539 (1998).
-
-     5.6714030     2.0002804     1.2085196     3.1213820     0.5774108
-     1.4533108     1.1247945     3.1213820     2.5609104    78.7590539
-     0.6966326   312.1341346     1.4074424     0.0070975     3.1083847
-
-connection between these parameters and Justo et al., Phys. Rev. B 58, 2539 (1998):
-
-A((B/r)**rh-palp*exp(-bet*Z*Z)) = A'((B'/r)**rh-exp(-bet*Z*Z))
-
-so in the paper (')
-A' = A*palp
-B' = B * palp**(-1/rh)
-eta = detla/Qo
-*/
-
-//! Literature
-//!
-//! http://www-math.mit.edu/~bazant/EDIP
-//! M.Z. Bazant & E. Kaxiras: Modeling of Covalent Bonding in Solids by
-//!                           Inversion of Cohesive Energy Curves;
-//!                           Phys. Rev. Lett. 77, 4370 (1996)
-//! M.Z. Bazant, E. Kaxiras and J.F. Justo: Environment-dependent interatomic
-//!                                         potential for bulk silicon;
-//!                                         Phys. Rev. B 56, 8542-8552 (1997)
-// 83a3f290 ends here
-
 // [[file:../edip.note::178e12ff][178e12ff]]
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
@@ -115,15 +87,12 @@ impl EdipParameters {
         s2: &mut HashMap<usize, Store2>,
         s3: &mut HashMap<usize, Store3>,
         sz: &mut HashMap<usize, Storez>,
-        neighbors: &[Neighbor],
-        distances: &Distances,
         pairs_within_cutoff: &[PairData],
     ) -> f64 {
         // Reset Coordination And Neighbor Numbers
         let mut Z = 0.0;
 
         let cmb_inv = 1.0 / (self.c - self.b);
-        let asqr = self.a.powi(2);
         s2.clear();
         s3.clear();
         sz.clear();
@@ -246,7 +215,6 @@ struct ThreeBodyInteraction {
     w_inv: f64,
     dw_inv: f64,
     dtau: f64,
-    temp0: f64,
 }
 
 impl ThreeBodyInteraction {
@@ -261,7 +229,6 @@ impl ThreeBodyInteraction {
         let w_inv = self.w_inv;
         let dw_inv = self.dw_inv;
         let dtau = self.dtau;
-        let temp0 = self.temp0;
 
         // --- Level 2: First Loop For Three-Body Interactions ---
         let mut virial = 0.0;
@@ -358,7 +325,7 @@ impl ThreeBodyInteraction {
 ///
 /// Returns computed potential energy and virial.
 ///
-pub fn compute_forces_edip(
+pub fn compute_forces(
     forces: &mut [Array3],
     neighbors: &[Neighbor],
     distances: &Distances,
@@ -394,8 +361,6 @@ pub fn compute_forces_edip(
             &mut s2,
             &mut s3,
             &mut sz,
-            neighbors,
-            distances,
             pairs_within_cutoff[i].as_slice(),
         );
 
@@ -414,7 +379,6 @@ pub fn compute_forces_edip(
         let temp0 = (-u4 * Z).exp();
         let w_inv = params.Qo.sqrt() * (-0.5 * params.mu * Z).exp(); /* inverse width of angular function */
         let threebody = ThreeBodyInteraction {
-            temp0,
             w_inv,
             tau: u1 + u2 * temp0 * (u3 - temp0), /* -cosine of angular minimum */
             dtau: u2 * u4 * temp0 * (2.0 * temp0 - u3), /* its derivative */
@@ -479,7 +443,7 @@ fn test_edip() -> Result<()> {
 
     let mut f = vec![[0.0; 3]; n];
     let params = EdipParameters::silicon();
-    let (energy, virial) = compute_forces_edip(&mut f, &neighbors, &distances, &params);
+    let (energy, virial) = compute_forces(&mut f, &neighbors, &distances, &params);
     approx::assert_relative_eq!(energy, -14.566606, epsilon = 1e-5);
     approx::assert_relative_eq!(virial, -3.643552, epsilon = 1e-5);
     #[rustfmt::skip]

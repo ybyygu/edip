@@ -1,7 +1,20 @@
+// [[file:../edip.note::*docs][docs:1]]
+//! Literature
+//!
+//! http://www-math.mit.edu/~bazant/EDIP
+//! M.Z. Bazant & E. Kaxiras: Modeling of Covalent Bonding in Solids by
+//!                           Inversion of Cohesive Energy Curves;
+//!                           Phys. Rev. Lett. 77, 4370 (1996)
+//! M.Z. Bazant, E. Kaxiras and J.F. Justo: Environment-dependent interatomic
+//!                                         potential for bulk silicon;
+//!                                         Phys. Rev. B 56, 8542-8552 (1997)
+// docs:1 ends here
+
 // [[file:../edip.note::1141962a][1141962a]]
 //#![deny(warnings)]
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
+
 use gut::prelude::*;
 
 type Array3 = [f64; 3];
@@ -12,6 +25,22 @@ mod edip;
 // 1ace2574 ends here
 
 // [[file:../edip.note::f46cb3ad][f46cb3ad]]
+/* EDIP Si PARAMETERS Justo et al., Phys. Rev. B 58, 2539 (1998).
+
+     5.6714030     2.0002804     1.2085196     3.1213820     0.5774108
+     1.4533108     1.1247945     3.1213820     2.5609104    78.7590539
+     0.6966326   312.1341346     1.4074424     0.0070975     3.1083847
+
+connection between these parameters and Justo et al., Phys. Rev. B 58, 2539 (1998):
+
+A((B/r)**rh-palp*exp(-bet*Z*Z)) = A'((B'/r)**rh-exp(-bet*Z*Z))
+
+so in the paper (')
+A' = A*palp
+B' = B * palp**(-1/rh)
+eta = detla/Qo
+*/
+
 // tau(Z) (Ismail & Kaxiras, 1993)
 const u1: f64 = -0.165799;
 const u2: f64 = 32.557;
@@ -38,7 +67,6 @@ pub struct EdipParameters {
     bg: f64,
     /// justo prefactor for bond order
     palp: f64,
-    delta: f64,
     eta: f64,
 }
 
@@ -71,7 +99,6 @@ impl EdipParameters {
             gam,
             b,
             c,
-            delta,
             mu,
             Qo,
             palp,
@@ -87,19 +114,3 @@ impl EdipParameters {
 // [[file:../edip.note::3d96dcdb][3d96dcdb]]
 pub use crate::edip::*;
 // 3d96dcdb ends here
-
-// [[file:../edip.note::4a762dc4][4a762dc4]]
-#[cfg(feature = "adhoc")]
-/// Docs for local mods
-pub mod docs {
-    macro_rules! export_doc {
-        ($l:ident) => {
-            pub mod $l {
-                pub use crate::$l::*;
-            }
-        };
-    }
-
-    export_doc!(edip);
-}
-// 4a762dc4 ends here

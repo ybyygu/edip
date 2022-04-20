@@ -39,7 +39,7 @@ fn silicon(neighbors: &[HashSet<usize>], distances: &HashMap<(usize, usize), [f6
     let n = neighbors.len();
     let mut f = vec![[0.0; 3]; n];
     let params = EdipParameters::silicon();
-    let (_energy, _virial) = compute_forces_edip(&mut f, &neighbors, &distances, &params);
+    let (_energy, _virial) = compute_forces(&mut f, &neighbors, &distances, &params);
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
