@@ -4,6 +4,9 @@ name = "edip"
 version = "0.1.0"
 edition = "2021"
 authors = ["Wenping Guo <ybyygu@gmail.com>"]
+description = "Environment-dependent interatomic potential (EDIP) for Silicon"
+license = "GPL-3.0"
+homepage = "https://github.com/ybyygu/edip"
 
 [dependencies]
 # FIXME: remove when ready

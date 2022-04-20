@@ -1,14 +1,14 @@
-// [[file:../edip.note::*docs][docs:1]]
-//! Literature
+// [[file:../edip.note::c5791ec5][c5791ec5]]
+//! # Literature
 //!
-//! http://www-math.mit.edu/~bazant/EDIP
-//! M.Z. Bazant & E. Kaxiras: Modeling of Covalent Bonding in Solids by
-//!                           Inversion of Cohesive Energy Curves;
-//!                           Phys. Rev. Lett. 77, 4370 (1996)
-//! M.Z. Bazant, E. Kaxiras and J.F. Justo: Environment-dependent interatomic
-//!                                         potential for bulk silicon;
-//!                                         Phys. Rev. B 56, 8542-8552 (1997)
-// docs:1 ends here
+//! - http://www-math.mit.edu/~bazant/EDIP
+//!
+//! - M.Z. Bazant & E. Kaxiras: Modeling of Covalent Bonding in Solids by
+//! Inversion of Cohesive Energy Curves; Phys. Rev. Lett. 77, 4370 (1996)
+//!
+//! - M.Z. Bazant, E. Kaxiras and J.F. Justo: Environment-dependent interatomic
+//! potential for bulk silicon; Phys. Rev. B 56, 8542-8552 (1997)
+// c5791ec5 ends here
 
 // [[file:../edip.note::1141962a][1141962a]]
 //#![deny(warnings)]
