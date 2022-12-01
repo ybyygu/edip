@@ -1,7 +1,7 @@
 # [[file:edip.note::11f0794f][11f0794f]]
 [package]
 name = "edip"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Wenping Guo <ybyygu@gmail.com>"]
 description = "Environment-dependent interatomic potential (EDIP) for Silicon"
@@ -9,13 +9,13 @@ license = "GPL-3.0"
 homepage = "https://github.com/ybyygu/edip"
 
 [dependencies]
-# FIXME: remove when ready
-gchemol = { version = "0.0.42", features=["adhoc"] }
 vecfx = { version="0.1", features = ["nalgebra"] }
-gut = {version="0.1.3", package="gchemol-gut"}
+gut = {version="0.3", package="gchemol-gut"}
 
 [dev-dependencies]
 criterion = "0.3"
+# FIXME: remove when ready
+gchemol = { version = "0.0.42", features=["adhoc"] }
 
 [[bench]]
 name = "silicon"

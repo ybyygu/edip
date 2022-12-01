@@ -1,7 +1,7 @@
 // [[file:../edip.note::c5791ec5][c5791ec5]]
 //! # Literature
 //!
-//! - http://www-math.mit.edu/~bazant/EDIP
+//! - <http://www-math.mit.edu/~bazant/EDIP>
 //!
 //! - M.Z. Bazant & E. Kaxiras: Modeling of Covalent Bonding in Solids by
 //! Inversion of Cohesive Energy Curves; Phys. Rev. Lett. 77, 4370 (1996)
